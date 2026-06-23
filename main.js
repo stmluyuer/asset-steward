@@ -2,7 +2,6 @@
 
 const Fs = require("fs");
 const Path = require("path");
-const Crypto = require("crypto");
 const { compatibleSuccess, compatibleError } = require("./main/protocol");
 const {
   getProjectPath,
@@ -18,7 +17,6 @@ const {
   pathExists,
   destinationOccupied,
   hasMeta,
-  writeJson,
 } = require("./main/path-utils");
 const {
   loadProfile,
@@ -37,13 +35,12 @@ const AssetScan = require("./main/asset-scan");
 const ReferenceGraph = require("./main/reference-graph");
 const RuntimeResources = require("./main/runtime-resources");
 const MovePlan = require("./main/move-plan");
+const Report = require("./main/report");
+const UnusedDelete = require("./main/unused-delete");
 const PACKAGE_VERSION = require("./package.json").version;
 
 const PACKAGE_NAME = "asset-steward";
-const REPORT_DIRECTORY_RELATIVE = "reports/asset-steward";
-const BACKUP_DIRECTORY_RELATIVE = "backups/asset-steward";
-const UNUSED_PROTECTED_EXTENSIONS = new Set([".cjs", ".js", ".mjs", ".ts", ".chunk"]);
-const UNUSED_IGNORED_FILES = new Set([".gitkeep", ".ds_store", "thumbs.db"]);
+const UNUSED_IGNORED_FILES = UnusedDelete.UNUSED_IGNORED_FILES;
 const MATERIAL_EXTENSIONS = new Set([".material", ".mtl", ".pmtl"]);
 const TOOLBOX_FRAMEWORK_VERSION = 1;
 const TOOLBOX_MODULES = [
@@ -374,6 +371,10 @@ function normalizeScanDirectory(value) {
   return AssetScan.normalizeScanDirectory(value);
 }
 
+function cloneData(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
 function getToolboxFramework() {
   return cloneData({
     version: TOOLBOX_FRAMEWORK_VERSION,
@@ -394,141 +395,16 @@ function getToolboxFramework() {
   });
 }
 
-function cloneData(value) {
-  return JSON.parse(JSON.stringify(value));
-}
-
 function exportSessionReport(payload) {
-  const snapshot = sanitizeReportSnapshot(payload?.snapshot || {});
-  const generatedAt = new Date().toISOString();
-  const report = {
-    schemaVersion: 1,
-    generatedAt,
-    packageName: PACKAGE_NAME,
-    packageVersion: PACKAGE_VERSION,
-    projectPath: getProjectPath(),
-    ...snapshot
-  };
-  const reportDirectory = toProjectPath(REPORT_DIRECTORY_RELATIVE);
-  Fs.mkdirSync(reportDirectory, { recursive: true });
-  const baseName = `asset-steward-${formatReportTimestamp(generatedAt)}`;
-  const jsonRelativePath = normalizeRelativePath(`${REPORT_DIRECTORY_RELATIVE}/${baseName}.json`);
-  const markdownRelativePath = normalizeRelativePath(`${REPORT_DIRECTORY_RELATIVE}/${baseName}.md`);
-  writeJson(toProjectPath(jsonRelativePath), report);
-  Fs.writeFileSync(toProjectPath(markdownRelativePath), renderSessionReportMarkdown(report), "utf8");
-  return {
-    generatedAt,
-    reportDirectory: REPORT_DIRECTORY_RELATIVE,
-    jsonPath: jsonRelativePath,
-    markdownPath: markdownRelativePath,
-    moduleCount: Array.isArray(report.modules) ? report.modules.length : 0
-  };
-}
-
-function sanitizeReportSnapshot(value) {
-  if (Array.isArray(value)) {
-    return value.map(sanitizeReportSnapshot);
-  }
-  if (!value || typeof value !== "object") {
-    return value;
-  }
-
-  const sanitized = {};
-  for (const [key, childValue] of Object.entries(value)) {
-    if (key.toLowerCase() === "token") {
-      continue;
-    }
-    sanitized[key] = sanitizeReportSnapshot(childValue);
-  }
-  return sanitized;
+  return Report.exportSessionReport(payload);
 }
 
 function formatReportTimestamp(isoTime) {
-  return String(isoTime || "")
-    .replace(/\D/g, "")
-    .slice(0, 17);
+  return Report.formatReportTimestamp(isoTime);
 }
 
 function renderSessionReportMarkdown(report) {
-  const modules = Array.isArray(report.modules) ? report.modules : [];
-  const lines = [
-    "# 项目资源管家会话报告",
-    "",
-    `- 生成时间：${report.generatedAt || "-"}`,
-    `- 扩展版本：${report.packageVersion || "-"}`,
-    `- 项目路径：\`${escapeMarkdownInline(report.projectPath || "-")}\``,
-    `- 已运行模块：${modules.length}`,
-    "",
-    "## 已运行模块",
-    ""
-  ];
-  if (modules.length === 0) {
-    lines.push("- 当前会话没有已运行的扫描或健康检查结果。", "");
-  }
-  for (const module of modules) {
-    lines.push(`### ${module.title || module.id || "未命名模块"}`, "");
-    appendMarkdownSummary(lines, module.summary);
-    lines.push("<details>", "<summary>完整结果</summary>", "", "```json", JSON.stringify(module.data || {}, null, 2), "```", "", "</details>", "");
-  }
-  lines.push("## 当前移动计划", "");
-  if (report.currentPlan) {
-    appendMarkdownSummary(lines, report.currentPlan.summary);
-    lines.push("```json", JSON.stringify(report.currentPlan, null, 2), "```", "");
-  } else {
-    lines.push("- 当前会话没有移动计划。", "");
-  }
-  lines.push("## 移动历史摘要", "");
-  if (Array.isArray(report.history) && report.history.length > 0) {
-    lines.push("| 时间 | 类型 | 模式 | 成功 | 失败 | 含覆盖 |", "|---|---|---|---:|---:|---|");
-    for (const item of report.history) {
-      lines.push(`| ${escapeMarkdownCell(item.createdAt)} | ${escapeMarkdownCell(item.kind)} | ${escapeMarkdownCell(item.mode)} | ${Number(item.movedCount) || 0} | ${Number(item.failedCount) || 0} | ${item.hasOverwrite ? "是" : "否"} |`);
-    }
-    lines.push("");
-  } else {
-    lines.push("- 当前没有移动历史摘要。", "");
-  }
-  lines.push("## 运行日志", "");
-  if (Array.isArray(report.logs) && report.logs.length > 0) {
-    lines.push("| 时间 | 级别 | 内容 |", "|---|---|---|");
-    for (const log of report.logs) {
-      lines.push(`| ${escapeMarkdownCell(log.time)} | ${escapeMarkdownCell(log.level)} | ${escapeMarkdownCell(log.message)} |`);
-    }
-    lines.push("");
-  } else {
-    lines.push("- 当前没有运行日志。", "");
-  }
-  return `${lines.join("\n")}\n`;
-}
-
-function appendMarkdownSummary(lines, summary) {
-  const entries = Object.entries(summary && typeof summary === "object" ? summary : {});
-  if (entries.length === 0) {
-    lines.push("- 无摘要。", "");
-    return;
-  }
-  lines.push("| 摘要字段 | 值 |", "|---|---|");
-  for (const [key, value] of entries) {
-    lines.push(`| ${escapeMarkdownCell(key)} | ${escapeMarkdownCell(formatMarkdownValue(value))} |`);
-  }
-  lines.push("");
-}
-
-function formatMarkdownValue(value) {
-  if (value === null || value === undefined) {
-    return "-";
-  }
-  if (typeof value === "object") {
-    return JSON.stringify(value);
-  }
-  return String(value);
-}
-
-function escapeMarkdownCell(value) {
-  return String(value ?? "-").replace(/\|/g, "\\|").replace(/\r?\n/g, "<br>");
-}
-
-function escapeMarkdownInline(value) {
-  return String(value ?? "-").replace(/`/g, "\\`");
+  return Report.renderSessionReportMarkdown(report);
 }
 
 function scanAssets(options) {
@@ -885,21 +761,7 @@ function toPublicDuplicateMembers(members) {
 }
 
 function hashFileSha256(fullPath) {
-  const hash = Crypto.createHash("sha256");
-  const buffer = Buffer.allocUnsafe(1024 * 1024);
-  const file = Fs.openSync(fullPath, "r");
-  try {
-    let bytesRead = 0;
-    do {
-      bytesRead = Fs.readSync(file, buffer, 0, buffer.length, null);
-      if (bytesRead > 0) {
-        hash.update(buffer.subarray(0, bytesRead));
-      }
-    } while (bytesRead > 0);
-  } finally {
-    Fs.closeSync(file);
-  }
-  return hash.digest("hex");
+  return UnusedDelete.hashFileSha256(fullPath);
 }
 
 function checkMaterialTextures(payload) {
@@ -1113,264 +975,33 @@ function countGraphUuidOccurrences(text) {
 }
 
 function scanUnusedAssets(payload) {
-  const scene = normalizeScenePath(payload?.scene);
-  const scanDirectory = normalizeScanDirectory(payload?.directory || payload?.scanDirectory || "assets/res");
-  const graph = buildSerializedAssetGraph();
-  const sceneAsset = graph.byPath.get(scene);
-  if (!sceneAsset) {
-    throw new Error(`主场景没有有效 UUID：${scene}`);
-  }
-  const reachable = collectReachableAssetChains(sceneAsset, graph.byUuid).chains;
-  const candidates = [];
-  let scannedCount = 0;
-  let reachableCount = 0;
-  let protectedCount = 0;
-  let ignoredCount = 0;
-  let candidateTotalSize = 0;
-  for (const asset of graph.assets) {
-    if (asset.path === scene || !isPathInDirectory(asset.path, scanDirectory)) {
-      continue;
-    }
-    if (UNUSED_IGNORED_FILES.has(Path.basename(asset.path).toLowerCase())) {
-      ignoredCount++;
-      continue;
-    }
-    scannedCount++;
-    if (reachable.has(asset.path)) {
-      reachableCount++;
-      continue;
-    }
-    if (UNUSED_PROTECTED_EXTENSIONS.has(asset.extension)) {
-      protectedCount++;
-      continue;
-    }
-    candidateTotalSize += asset.size;
-    candidates.push({
-      path: asset.path,
-      extension: asset.extension,
-      size: asset.size,
-      risk: "dynamic-unknown"
-    });
-  }
-  candidates.sort((left, right) => right.size - left.size || comparePath(left.path, right.path));
-  return {
-    candidates,
-    protectedExtensions: [...UNUSED_PROTECTED_EXTENSIONS].sort(comparePath),
-    summary: {
-      scene,
-      scanDirectory,
-      scannedCount,
-      reachableCount,
-      candidateCount: candidates.length,
-      candidateTotalSize,
-      protectedCount,
-      ignoredCount,
-      unresolvedReferenceCount: graph.unresolvedReferenceCount
-    },
-    warning: "候选仅表示未从主场景序列化 UUID 依赖图到达，不代表可以删除。resources.load/loadDir、AssetManager、运行时拼接路径和渠道资源无法可靠确认；脚本与 Shader Chunk 已强制保护。"
-  };
+  return UnusedDelete.scanUnusedAssets(payload);
 }
 
 function buildUnusedDeletePlan(payload) {
-  const scene = normalizeScenePath(payload?.scene);
-  const scanDirectory = normalizeScanDirectory(payload?.directory || payload?.scanDirectory || "assets/res");
-  const backupScope = normalizeUnusedDeleteBackupScope(payload?.backupScope);
-  const selectedPaths = canonicalizeSelectedPaths(payload?.paths);
-  if (selectedPaths.length === 0) {
-    throw new Error("请先勾选要删除的未引用候选。");
-  }
-  const currentScan = scanUnusedAssets({ scene, directory: scanDirectory });
-  const candidateByPath = new Map(currentScan.candidates.map((item) => [item.path, item]));
-  const items = selectedPaths.map((path) => buildUnusedDeletePlanItem(path, candidateByPath));
-  const readyItems = items.filter((item) => item.status === "ready");
-  const token = `${Date.now()}-${Crypto.randomBytes(8).toString("hex")}`;
-  const plan = {
-    token,
-    kind: "unused-delete",
-    scene,
-    scanDirectory,
-    backupScope,
-    items,
-    summary: summarizeUnusedDeletePlan(items, backupScope),
-    warning: "删除候选已按当前主场景依赖图重新校验；执行时会再次校验并先创建备份。删除后仍需在 Creator 中回归场景、Prefab、resources 动态加载和玩法。"
-  };
-  return {
-    ...plan,
-    publicResult: cloneData(plan)
-  };
-}
-
-function buildUnusedDeletePlanItem(path, candidateByPath) {
-  const candidate = candidateByPath.get(path);
-  const base = {
-    path,
-    extension: Path.extname(path).toLowerCase() || "(无扩展名)",
-    size: statPath(path)?.size || 0,
-    status: "blocked",
-    reason: ""
-  };
-  if (!candidate) {
-    return { ...base, reason: "当前资源不在最新未引用候选中，请重新扫描和复核" };
-  }
-  if (!statPath(path)?.isFile()) {
-    return { ...base, reason: "资源文件不存在" };
-  }
-  if (!hasMeta(path)) {
-    return { ...base, reason: "资源缺少 .meta，拒绝删除" };
-  }
-  return {
-    ...base,
-    extension: candidate.extension,
-    size: candidate.size,
-    status: "ready",
-    reason: "已重新确认为未引用候选"
-  };
-}
-
-function summarizeUnusedDeletePlan(items, backupScope) {
-  const ready = items.filter((item) => item.status === "ready");
-  return {
-    total: items.length,
-    ready: ready.length,
-    blocked: items.length - ready.length,
-    totalSize: ready.reduce((sum, item) => sum + (Number(item.size) || 0), 0),
-    backupScope
-  };
-}
-
-function normalizeUnusedDeleteBackupScope(value) {
-  return value === "scan-directory" ? "scan-directory" : "selected";
+  return UnusedDelete.buildUnusedDeletePlan(payload);
 }
 
 async function executeUnusedDelete(payload) {
-  const token = String(payload?.token || "");
-  if (!lastUnusedDeletePlan || token !== lastUnusedDeletePlan.token) {
-    throw new Error("未引用删除计划已失效，请重新生成预览。");
-  }
-  if (payload?.confirmed !== true) {
-    throw new Error("执行删除前必须完成二次确认。");
-  }
-  const readyItems = lastUnusedDeletePlan.items.filter((item) => item.status === "ready");
-  if (readyItems.length === 0) {
-    throw new Error("当前删除计划没有可执行项。");
-  }
-  validateUnusedDeletePlanStillCurrent(lastUnusedDeletePlan);
-  const backup = createUnusedDeleteBackup(lastUnusedDeletePlan);
-  const deleted = [];
-  const failed = [];
-  for (const item of readyItems.sort((left, right) => right.path.length - left.path.length || comparePath(left.path, right.path))) {
-    try {
-      await Editor.Message.request("asset-db", "delete-asset", toDbUrl(item.path));
-      if (!await waitUntil(() => !pathExists(item.path), 5000)) {
-        throw new Error("AssetDB 删除后资源仍存在");
-      }
-      deleted.push({
-        path: item.path,
-        size: item.size
-      });
-    } catch (error) {
-      failed.push({
-        path: item.path,
-        message: error?.message || String(error)
-      });
-    }
-  }
-  const auditPath = writeUnusedDeleteExecutionAudit(backup, { deleted, failed });
+  const result = await UnusedDelete.executeUnusedDelete(payload, lastUnusedDeletePlan);
   lastUnusedDeletePlan = null;
-  return {
-    backup,
-    auditPath,
-    deleted,
-    failed,
-    warning: "删除已通过 AssetDB 执行。请重新运行资源扫描、未引用扫描、场景/Prefab 引用健康检查，并在 Creator 中回归相关场景。"
-  };
+  return result;
 }
 
 function validateUnusedDeletePlanStillCurrent(plan) {
-  const currentScan = scanUnusedAssets({ scene: plan.scene, directory: plan.scanDirectory });
-  const candidatePaths = new Set(currentScan.candidates.map((item) => item.path));
-  const invalid = plan.items
-    .filter((item) => item.status === "ready")
-    .filter((item) => !candidatePaths.has(item.path) || !statPath(item.path)?.isFile() || !hasMeta(item.path));
-  if (invalid.length > 0) {
-    throw new Error(`删除前校验失败，请重新扫描和预览：${invalid.map((item) => item.path).join("、")}`);
-  }
+  return UnusedDelete.validateUnusedDeletePlanStillCurrent(plan);
 }
 
 function createUnusedDeleteBackup(plan) {
-  const generatedAt = new Date().toISOString();
-  const backupRoot = normalizeRelativePath(`${BACKUP_DIRECTORY_RELATIVE}/unused-delete-${formatReportTimestamp(generatedAt)}`);
-  const files = collectUnusedDeleteBackupFiles(plan);
-  const copiedFiles = [];
-  Fs.mkdirSync(toProjectPath(backupRoot), { recursive: true });
-  for (const file of files) {
-    const destination = normalizeRelativePath(`${backupRoot}/${file}`);
-    Fs.mkdirSync(Path.dirname(toProjectPath(destination)), { recursive: true });
-    Fs.copyFileSync(toProjectPath(file), toProjectPath(destination));
-    copiedFiles.push({
-      source: file,
-      backupPath: destination,
-      size: statPath(file)?.size || 0,
-      sha256: hashFileSha256(toProjectPath(file))
-    });
-  }
-  const manifest = {
-    schemaVersion: 1,
-    generatedAt,
-    backupScope: plan.backupScope,
-    scene: plan.scene,
-    scanDirectory: plan.scanDirectory,
-    deleteCandidates: plan.items.filter((item) => item.status === "ready").map((item) => ({
-      path: item.path,
-      extension: item.extension,
-      size: item.size
-    })),
-    copiedFiles
-  };
-  const manifestPath = normalizeRelativePath(`${backupRoot}/manifest.json`);
-  writeJson(toProjectPath(manifestPath), manifest);
-  return {
-    generatedAt,
-    backupDirectory: backupRoot,
-    manifestPath,
-    fileCount: copiedFiles.length,
-    totalSize: copiedFiles.reduce((sum, item) => sum + item.size, 0)
-  };
+  return UnusedDelete.createUnusedDeleteBackup(plan);
 }
 
 function writeUnusedDeleteExecutionAudit(backup, result) {
-  const audit = {
-    schemaVersion: 1,
-    generatedAt: new Date().toISOString(),
-    backupDirectory: backup.backupDirectory,
-    manifestPath: backup.manifestPath,
-    deleted: Array.isArray(result.deleted) ? result.deleted : [],
-    failed: Array.isArray(result.failed) ? result.failed : []
-  };
-  const auditPath = normalizeRelativePath(`${backup.backupDirectory}/execution-result.json`);
-  writeJson(toProjectPath(auditPath), audit);
-  return auditPath;
+  return UnusedDelete.writeUnusedDeleteExecutionAudit(backup, result);
 }
 
 function collectUnusedDeleteBackupFiles(plan) {
-  const result = new Set();
-  if (plan.backupScope === "scan-directory") {
-    walk(toProjectPath(plan.scanDirectory), (fullPath, entry) => {
-      if (entry.isFile()) {
-        result.add(toRelativePath(fullPath));
-      }
-    });
-  } else {
-    for (const item of plan.items.filter((candidate) => candidate.status === "ready")) {
-      result.add(item.path);
-      if (pathExists(`${item.path}.meta`)) {
-        result.add(`${item.path}.meta`);
-      }
-    }
-  }
-  return [...result]
-    .filter((path) => statPath(path)?.isFile())
-    .sort(comparePath);
+  return UnusedDelete.collectUnusedDeleteBackupFiles(plan);
 }
 
 async function executeMoves(payload) {

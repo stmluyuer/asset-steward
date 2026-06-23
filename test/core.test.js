@@ -224,6 +224,53 @@ test("unused delete backup manifest records hashes and execution audit", () => {
   assert.equal(audit.manifestPath, backup.manifestPath);
 });
 
+test("unused delete execution uses AssetDB delete and writes audit", async () => {
+  resetDirectory("assets/delete-execute");
+  resetDirectory("assets/delete-scene");
+  writeDirectoryAsset("assets/delete-execute");
+  writeDirectoryAsset("assets/delete-scene");
+  writeAsset("assets/delete-execute/unused.png", "unused-content");
+  writeJson("assets/delete-scene/main.scene", []);
+  writeJson("assets/delete-scene/main.scene.meta", {
+    uuid: "33333333-3333-4333-8333-333333333333"
+  });
+
+  const originalRequest = global.Editor.Message.request;
+  global.Editor.Message.request = async (channel, message, dbUrl) => {
+    assert.equal(channel, "asset-db");
+    assert.equal(message, "delete-asset");
+    const relativePath = String(dbUrl).replace(/^db:\/\//, "");
+    Fs.rmSync(Path.join(projectRoot, relativePath), { force: true });
+    Fs.rmSync(Path.join(projectRoot, `${relativePath}.meta`), { force: true });
+    return true;
+  };
+
+  try {
+    const preview = extension.methods.previewUnusedDelete({
+      scene: "assets/delete-scene/main.scene",
+      directory: "assets/delete-execute",
+      paths: ["assets/delete-execute/unused.png"]
+    });
+
+    assert.equal(preview.ok, true);
+    assert.equal(preview.summary.ready, 1);
+
+    const execution = await extension.methods.executeUnusedDelete({
+      token: preview.token,
+      confirmed: true
+    });
+
+    assert.equal(execution.ok, true);
+    assert.equal(execution.deleted.length, 1);
+    assert.equal(execution.failed.length, 0);
+    assert.equal(Fs.existsSync(Path.join(projectRoot, "assets/delete-execute/unused.png")), false);
+    assert.equal(Fs.existsSync(Path.join(projectRoot, execution.backup.manifestPath)), true);
+    assert.equal(Fs.existsSync(Path.join(projectRoot, execution.auditPath)), true);
+  } finally {
+    global.Editor.Message.request = originalRequest;
+  }
+});
+
 test("session report export removes execution tokens from json and markdown", () => {
   resetDirectory("reports");
 

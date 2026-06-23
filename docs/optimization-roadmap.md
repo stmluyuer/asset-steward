@@ -20,10 +20,11 @@
 - 拆出 `panel/request.js` 和 `panel/format.js`，面板请求兼容转换与格式化工具已从大面板文件中分离。
 - 拆出 `main/path-utils.js`、`main/profile.js` 和 `main/move-plan.js`，路径工具、profile/log 读写、移动预览和执行已从 `main.js` 中分离。
 - 拆出 `main/asset-scan.js`、`main/reference-graph.js` 和 `main/runtime-resources.js`，资源扫描、UUID 引用图和 resources 动态加载静态检查已模块化。
+- 拆出 `main/unused-delete.js` 和 `main/report.js`，未引用删除预览/备份/审计与会话报告导出已模块化。
 
 还没有完成：
 
-- 主进程和面板的大文件拆分。
+- 面板大文件拆分，以及主进程剩余健康检查逻辑拆分。
 - 所有模块的系统性测试覆盖。
 - 完整统一的新协议错误返回。
 - 可拖拽缩放的小窗口工作区。
@@ -36,9 +37,9 @@
 | 兼容 IPC 协议 | 已完成错误返回入口 | 80% | `main/protocol.js`、`toProtocol()`、`withProtocol()`、`requestMain()` | 继续细化不同错误码 |
 | 面板请求收敛 | 已拆出请求模块 | 80% | `panel/request.js`、`requestMain()`、`createAssetStewardError()` | 继续统一 loading、错误提示和日志 |
 | 危险操作审计 | 已完成第一版 | 65% | 移动失败明细持久化、删除备份 hash、`execution-result.json` | 增加恢复辅助入口、备份校验入口、审计报告聚合 |
-| 自动化测试 | 已覆盖阶段 1 收尾项和首批模块拆分 | 45% | `npm.cmd test` 通过 12 个测试 | 覆盖更多扫描、引用图、resources 检查和历史迁移边界 |
+| 自动化测试 | 已覆盖阶段 1 收尾项和主进程模块拆分关键路径 | 50% | `npm.cmd test` 通过 13 个测试 | 覆盖更多扫描、引用图、resources 检查和历史迁移边界 |
 | 文档收敛 | 已完成起步 | 45% | `docs/architecture.md`、`docs/safety.md`、本文档 | 从 `FEATURES.md` 拆出 roadmap、用户手册、开发手册 |
-| 主进程模块拆分 | 已完成核心扫描与移动拆分 | 55% | `main/path-utils.js`、`main/profile.js`、`main/move-plan.js`、`main/asset-scan.js`、`main/reference-graph.js`、`main/runtime-resources.js`；`main.js` 仍承载删除审计、报告和部分健康检查逻辑 | 继续拆删除审计、报告和健康检查模块 |
+| 主进程模块拆分 | 已完成核心扫描、移动、删除审计与报告拆分 | 70% | `main/path-utils.js`、`main/profile.js`、`main/move-plan.js`、`main/asset-scan.js`、`main/reference-graph.js`、`main/runtime-resources.js`、`main/unused-delete.js`、`main/report.js`；`main.js` 仍承载部分健康检查逻辑 | 继续拆健康检查模块 |
 | 面板模块拆分 | 已完成基础工具拆分 | 15% | `panel/request.js`、`panel/format.js`；`panel/main.js` 仍承载模板、样式、状态和渲染 | 按 Tab 或模块拆分状态、渲染、事件绑定 |
 | UI 风险总览 | 未开始 | 0% | 各 Tab 结果仍分散展示 | 增加全局风险摘要、推荐下一步、最近执行状态 |
 | 可拖拽缩放工作区 | 未开始 | 0% | 当前仍是固定 Tab 布局 | 实现窗口拖拽、缩放、布局保存、重置和平铺 |
@@ -84,8 +85,9 @@
 - 已完成：`main/reference-graph.js`：UUID 提取、序列化资源引用、主场景可达图。
 - 已完成：`main/runtime-resources.js`：`resources.load/loadDir` 静态检查。
 - 已完成：`main/move-plan.js`：移动预览、冲突策略、反向计划、执行。
-- `main/unused-delete.js`：未引用删除预览、备份、manifest、执行审计。
-- `main/report.js`：Markdown/JSON 报告。
+- 已完成：`main/unused-delete.js`：未引用删除预览、备份、manifest、执行审计。
+- 已完成：`main/report.js`：Markdown/JSON 报告。
+- 待评估：`main/health-checks.js` 或按检查类型继续拆分包体、目录规范、重复资源、材质贴图和场景/Prefab 引用健康检查。
 
 验收标准：
 
@@ -154,7 +156,7 @@
 
 ## 近期推荐顺序
 
-1. 继续拆 `main/unused-delete.js`、`main/report.js`，再评估健康检查是否按模块拆分。
+1. 评估并继续拆主进程健康检查逻辑，优先选择包体统计、目录规范、重复资源或材质贴图中边界最清楚的一块。
 2. 做小窗口工作区第一版，只迁移资源扫描、引用检查、日志。
 3. 做总览风险面板。
 
