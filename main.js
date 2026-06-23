@@ -3,13 +3,16 @@
 const Fs = require("fs");
 const Path = require("path");
 const Crypto = require("crypto");
+const { compatibleSuccess } = require("./main/protocol");
 const PACKAGE_VERSION = require("./package.json").version;
 
-const PACKAGE_NAME = "project-asset-mover";
-const PROFILE_RELATIVE = "profiles/project-asset-mover.json";
-const LOG_RELATIVE = "profiles/project-asset-mover.logs.json";
-const REPORT_DIRECTORY_RELATIVE = "reports/project-asset-mover";
-const BACKUP_DIRECTORY_RELATIVE = "backups/project-asset-mover";
+const PACKAGE_NAME = "asset-steward";
+const PROFILE_RELATIVE = "profiles/asset-steward.json";
+const LOG_RELATIVE = "profiles/asset-steward.logs.json";
+const REPORT_DIRECTORY_RELATIVE = "reports/asset-steward";
+const BACKUP_DIRECTORY_RELATIVE = "backups/asset-steward";
+const LEGACY_PROFILE_RELATIVE = "profiles/project-asset-mover.json";
+const LEGACY_LOG_RELATIVE = "profiles/project-asset-mover.logs.json";
 const PROFILE_VERSION = 2;
 const MAX_HISTORY = 30;
 const MAX_LOGS = 200;
@@ -239,108 +242,112 @@ exports.methods = {
   },
 
   scanAssets(options) {
-    return scanAssets(options);
+    return toProtocol(scanAssets(options));
   },
 
   checkReferences(payload) {
-    return checkReferences(payload);
+    return toProtocol(checkReferences(payload));
   },
 
   async selectReferenceNode(payload) {
-    return selectReferenceNode(payload);
+    return toProtocol(await selectReferenceNode(payload));
   },
 
   checkNodeReferences(payload) {
-    return checkNodeReferences(payload);
+    return toProtocol(checkNodeReferences(payload));
   },
 
   checkResourcesRuntime(payload) {
-    return checkResourcesRuntime(payload);
+    return toProtocol(checkResourcesRuntime(payload));
   },
 
   reportPackageSize(payload) {
-    return reportPackageSize(payload);
+    return toProtocol(reportPackageSize(payload));
   },
 
   checkDirectoryConvention(payload) {
-    return checkDirectoryConvention(payload);
+    return toProtocol(checkDirectoryConvention(payload));
   },
 
   checkDuplicateAssets(payload) {
-    return checkDuplicateAssets(payload);
+    return toProtocol(checkDuplicateAssets(payload));
   },
 
   checkMaterialTextures(payload) {
-    return checkMaterialTextures(payload);
+    return toProtocol(checkMaterialTextures(payload));
   },
 
   checkScenePrefabReferenceHealth(payload) {
-    return checkScenePrefabReferenceHealth(payload);
+    return toProtocol(checkScenePrefabReferenceHealth(payload));
   },
 
   scanUnusedAssets(payload) {
-    return scanUnusedAssets(payload);
+    return toProtocol(scanUnusedAssets(payload));
   },
 
   previewUnusedDelete(payload) {
     lastUnusedDeletePlan = buildUnusedDeletePlan(payload);
-    return lastUnusedDeletePlan.publicResult;
+    return toProtocol(lastUnusedDeletePlan.publicResult);
   },
 
   async executeUnusedDelete(payload) {
-    return executeUnusedDelete(payload);
+    return toProtocol(await executeUnusedDelete(payload));
   },
 
   getToolboxFramework() {
-    return getToolboxFramework();
+    return toProtocol(getToolboxFramework());
   },
 
   loadState() {
-    return loadState();
+    return toProtocol(loadState());
   },
 
   getHistoryDetail(payload) {
-    return getHistoryDetail(payload);
+    return toProtocol(getHistoryDetail(payload));
   },
 
   appendLog(payload) {
-    return appendLog(payload);
+    return toProtocol(appendLog(payload));
   },
 
   getLogs() {
-    return getLogs();
+    return toProtocol(getLogs());
   },
 
   clearLogs() {
-    return clearLogs();
+    return toProtocol(clearLogs());
   },
 
   exportSessionReport(payload) {
-    return exportSessionReport(payload);
+    return toProtocol(exportSessionReport(payload));
   },
 
   saveRules(payload) {
-    return saveRules(payload?.rules);
+    return toProtocol(saveRules(payload?.rules));
   },
 
   previewMoves(payload) {
     lastPlan = buildMovePlan(payload);
-    return lastPlan.publicResult;
+    return toProtocol(lastPlan.publicResult);
   },
 
   async executeMoves(payload) {
-    return executeMoves(payload);
+    return toProtocol(await executeMoves(payload));
   },
 
   previewReverse(payload) {
     lastPlan = buildReversePlan(payload?.historyId, payload?.conflictPolicy);
-    return lastPlan.publicResult;
+    return toProtocol(lastPlan.publicResult);
   },
 
   locateAsset(payload) {
-    return locateAsset(payload);
+    return toProtocol(locateAsset(payload));
   },
 };
+
+function toProtocol(payload, warnings = []) {
+  return compatibleSuccess(payload, warnings);
+}
 
 function getProjectPath() {
   return global.Editor?.Project?.path || Path.resolve(__dirname, "../..");
@@ -429,6 +436,16 @@ function readJson(filePath, fallback) {
   }
 }
 
+function readJsonWithLegacy(primaryPath, legacyPath, fallback) {
+  if (Fs.existsSync(primaryPath)) {
+    return readJson(primaryPath, fallback);
+  }
+  if (legacyPath && Fs.existsSync(legacyPath)) {
+    return readJson(legacyPath, fallback);
+  }
+  return fallback;
+}
+
 function writeJson(filePath, value) {
   Fs.mkdirSync(Path.dirname(filePath), { recursive: true });
   Fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
@@ -440,6 +457,14 @@ function getProfilePath() {
 
 function getLogPath() {
   return toProjectPath(LOG_RELATIVE);
+}
+
+function getLegacyProfilePath() {
+  return toProjectPath(LEGACY_PROFILE_RELATIVE);
+}
+
+function getLegacyLogPath() {
+  return toProjectPath(LEGACY_LOG_RELATIVE);
 }
 
 function defaultProfile() {
@@ -466,9 +491,10 @@ function defaultRules() {
 }
 
 function loadProfile() {
-  const rawProfile = readJson(getProfilePath(), defaultProfile());
+  const profilePath = getProfilePath();
+  const rawProfile = readJsonWithLegacy(profilePath, getLegacyProfilePath(), defaultProfile());
   const profile = migrateProfile(rawProfile);
-  if (Number(rawProfile?.version) < PROFILE_VERSION) {
+  if (Number(rawProfile?.version) < PROFILE_VERSION || !Fs.existsSync(profilePath)) {
     saveProfile(profile);
   }
   return {
@@ -532,6 +558,15 @@ function getHistoryDetail(payload) {
   const deletedDirectories = Array.isArray(entry.deletedDirectories)
     ? entry.deletedDirectories.map(normalizeRelativePath)
     : [];
+  const failedMoves = Array.isArray(entry.failedMoves) ? entry.failedMoves.map((move) => ({
+    source: normalizeRelativePath(move.source),
+    destination: normalizeRelativePath(move.destination),
+    message: String(move.message || "")
+  })) : [];
+  const failedDirectories = Array.isArray(entry.failedDirectories) ? entry.failedDirectories.map((item) => ({
+    path: normalizeRelativePath(item.path),
+    message: String(item.message || "")
+  })) : [];
   return {
     detail: {
       id: entry.id,
@@ -544,10 +579,14 @@ function getHistoryDetail(payload) {
       hasOverwrite: entry.hasOverwrite === true,
       deletedDirectories,
       cleanupFailedCount: Number(entry.cleanupFailedCount) || 0,
+      failedMoves,
+      failedDirectories,
       moves,
-      failedMovesPersisted: false,
-      failedDirectoriesPersisted: false,
-      warning: "历史记录只持久化成功移动项、覆盖风险和空目录清理摘要；执行失败项和清理失败明细需查看当次执行日志。反向计划仍需重新预览并人工复核。"
+      failedMovesPersisted: Array.isArray(entry.failedMoves),
+      failedDirectoriesPersisted: Array.isArray(entry.failedDirectories),
+      warning: Array.isArray(entry.failedMoves) || Array.isArray(entry.failedDirectories)
+        ? "历史记录已包含本次执行的失败明细；反向计划仍需重新预览并人工复核。"
+        : "历史记录只持久化成功移动项、覆盖风险和空目录清理摘要；执行失败项和清理失败明细需查看当次执行日志。反向计划仍需重新预览并人工复核。"
     }
   };
 }
@@ -577,7 +616,7 @@ function cloneData(value) {
 }
 
 function getLogs() {
-  const data = readJson(getLogPath(), { logs: [] });
+  const data = readJsonWithLegacy(getLogPath(), getLegacyLogPath(), { logs: [] });
   return {
     logs: Array.isArray(data.logs) ? data.logs.slice(-MAX_LOGS) : [],
     logPath: LOG_RELATIVE
@@ -634,7 +673,7 @@ function exportSessionReport(payload) {
   };
   const reportDirectory = toProjectPath(REPORT_DIRECTORY_RELATIVE);
   Fs.mkdirSync(reportDirectory, { recursive: true });
-  const baseName = `project-asset-mover-${formatReportTimestamp(generatedAt)}`;
+  const baseName = `asset-steward-${formatReportTimestamp(generatedAt)}`;
   const jsonRelativePath = normalizeRelativePath(`${REPORT_DIRECTORY_RELATIVE}/${baseName}.json`);
   const markdownRelativePath = normalizeRelativePath(`${REPORT_DIRECTORY_RELATIVE}/${baseName}.md`);
   writeJson(toProjectPath(jsonRelativePath), report);
@@ -657,7 +696,7 @@ function formatReportTimestamp(isoTime) {
 function renderSessionReportMarkdown(report) {
   const modules = Array.isArray(report.modules) ? report.modules : [];
   const lines = [
-    "# 项目资源工具箱会话报告",
+    "# 项目资源管家会话报告",
     "",
     `- 生成时间：${report.generatedAt || "-"}`,
     `- 扩展版本：${report.packageVersion || "-"}`,
@@ -2540,9 +2579,11 @@ async function executeUnusedDelete(payload) {
       });
     }
   }
+  const auditPath = writeUnusedDeleteExecutionAudit(backup, { deleted, failed });
   lastUnusedDeletePlan = null;
   return {
     backup,
+    auditPath,
     deleted,
     failed,
     warning: "删除已通过 AssetDB 执行。请重新运行资源扫描、未引用扫描、场景/Prefab 引用健康检查，并在 Creator 中回归相关场景。"
@@ -2573,7 +2614,8 @@ function createUnusedDeleteBackup(plan) {
     copiedFiles.push({
       source: file,
       backupPath: destination,
-      size: statPath(file)?.size || 0
+      size: statPath(file)?.size || 0,
+      sha256: hashFileSha256(toProjectPath(file))
     });
   }
   const manifest = {
@@ -2598,6 +2640,20 @@ function createUnusedDeleteBackup(plan) {
     fileCount: copiedFiles.length,
     totalSize: copiedFiles.reduce((sum, item) => sum + item.size, 0)
   };
+}
+
+function writeUnusedDeleteExecutionAudit(backup, result) {
+  const audit = {
+    schemaVersion: 1,
+    generatedAt: new Date().toISOString(),
+    backupDirectory: backup.backupDirectory,
+    manifestPath: backup.manifestPath,
+    deleted: Array.isArray(result.deleted) ? result.deleted : [],
+    failed: Array.isArray(result.failed) ? result.failed : []
+  };
+  const auditPath = normalizeRelativePath(`${backup.backupDirectory}/execution-result.json`);
+  writeJson(toProjectPath(auditPath), audit);
+  return auditPath;
 }
 
 function collectUnusedDeleteBackupFiles(plan) {
@@ -3072,6 +3128,8 @@ function recordHistory(plan, moved, failed, cleanup) {
     hasOverwrite: moved.some((item) => item.action === "overwrite"),
     deletedDirectories: cleanup.deletedDirectories,
     cleanupFailedCount: cleanup.failedDirectories.length,
+    failedMoves: failed,
+    failedDirectories: cleanup.failedDirectories,
     moves: moved
   };
   profile.history.unshift(history);
@@ -3139,6 +3197,7 @@ exports._test = {
   buildUnusedDeletePlan,
   executeUnusedDelete,
   createUnusedDeleteBackup,
+  writeUnusedDeleteExecutionAudit,
   collectUnusedDeleteBackupFiles,
   exportSessionReport,
   renderSessionReportMarkdown,

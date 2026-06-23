@@ -1,6 +1,6 @@
 "use strict";
 
-const PACKAGE_NAME = "project-asset-mover";
+const PACKAGE_NAME = "asset-steward";
 
 let entries = [];
 let directories = [];
@@ -48,8 +48,8 @@ exports.template = `
 <section class="root">
   <header class="toolbox-header">
     <div>
-      <h2>项目资源工具箱</h2>
-      <p>资源扫描、自动分类、未引用资源、健康检查和历史报告的合集入口。</p>
+      <h2>项目资源管家</h2>
+      <p>资源扫描、自动分类、未引用资源、健康检查和历史报告的治理入口。</p>
     </div>
     <nav id="tabBar" class="tab-bar">
       <button class="tab-button" data-tab="scan">资源扫描</button>
@@ -813,9 +813,20 @@ function activateTab(panel, tabName) {
   });
 }
 
+async function requestMain(message, payload) {
+  const result = await Editor.Message.request(PACKAGE_NAME, message, payload);
+  if (result?.ok === false) {
+    const error = new Error(result.error?.message || "Asset Steward request failed");
+    error.code = result.error?.code || "ERR_ASSET_STEWARD";
+    error.detail = result.error || null;
+    throw error;
+  }
+  return result;
+}
+
 async function loadState(panel) {
   try {
-    const state = await Editor.Message.request(PACKAGE_NAME, "load-state");
+    const state = await requestMain("load-state");
     rules = state.rules || [];
     history = state.history || [];
     selectedHistoryDetail = null;
@@ -829,7 +840,7 @@ async function loadState(panel) {
 
 async function loadLogs(panel) {
   try {
-    const result = await Editor.Message.request(PACKAGE_NAME, "get-logs");
+    const result = await requestMain("get-logs");
     runtimeLogs = result.logs || [];
     renderLogs(panel);
   } catch (error) {
@@ -848,7 +859,7 @@ async function exportSessionReport(panel) {
   setStatus(panel, "正在导出当前会话报告...");
   try {
     const snapshot = buildSessionReportSnapshot();
-    const result = await Editor.Message.request(PACKAGE_NAME, "export-session-report", {
+    const result = await requestMain("export-session-report", {
       snapshot
     });
     panel.$.exportSessionReportSummary.textContent = `已导出 ${safeNumber(result.moduleCount)} 个已运行模块：${result.markdownPath}、${result.jsonPath}`;
@@ -954,7 +965,7 @@ async function loadHistoryDetail(panel) {
   setBusy(panel, true);
   setStatus(panel, "正在读取移动历史详情...");
   try {
-    const result = await Editor.Message.request(PACKAGE_NAME, "get-history-detail", { historyId });
+    const result = await requestMain("get-history-detail", { historyId });
     selectedHistoryDetail = result.detail || null;
     renderHistoryDetail(panel);
     setStatus(panel, selectedHistoryDetail?.warning || "移动历史详情已加载。");
@@ -977,8 +988,14 @@ function renderHistoryDetail(panel) {
     panel.$.historyCleanupSummary.textContent = "暂无清理结果。";
     return;
   }
-  panel.$.historyDetailSummary.textContent = `${formatDate(detail.createdAt)}：${detail.kind === "reverse" ? "反向" : "移动"} / ${detail.mode || "-"} / ${detail.conflictPolicy || "-"}；成功 ${safeNumber(detail.movedCount)} 项，失败 ${safeNumber(detail.failedCount)} 项，含覆盖 ${detail.hasOverwrite ? "是" : "否"}。失败明细未持久化，请查看当次执行日志。`;
-  panel.$.historyCleanupSummary.textContent = `删除空源目录 ${safeNumber(detail.deletedDirectories?.length)} 个：${formatPathList(detail.deletedDirectories)}；清理失败 ${safeNumber(detail.cleanupFailedCount)} 个（失败明细未持久化）。`;
+  const failedMoveHint = detail.failedMovesPersisted
+    ? `失败明细 ${safeNumber(detail.failedMoves?.length)} 项已持久化。`
+    : "失败明细未持久化，请查看当次执行日志。";
+  const cleanupFailedHint = detail.failedDirectoriesPersisted
+    ? `清理失败明细 ${safeNumber(detail.failedDirectories?.length)} 项已持久化。`
+    : "失败明细未持久化。";
+  panel.$.historyDetailSummary.textContent = `${formatDate(detail.createdAt)}：${detail.kind === "reverse" ? "反向" : "移动"} / ${detail.mode || "-"} / ${detail.conflictPolicy || "-"}；成功 ${safeNumber(detail.movedCount)} 项，失败 ${safeNumber(detail.failedCount)} 项，含覆盖 ${detail.hasOverwrite ? "是" : "否"}。${failedMoveHint}`;
+  panel.$.historyCleanupSummary.textContent = `删除空源目录 ${safeNumber(detail.deletedDirectories?.length)} 个：${formatPathList(detail.deletedDirectories)}；清理失败 ${safeNumber(detail.cleanupFailedCount)} 个（${cleanupFailedHint}）。`;
   for (const move of moves) {
     const row = document.createElement("tr");
     row.innerHTML = `
@@ -1003,7 +1020,7 @@ async function addLog(panel, level, message, detail = "") {
   renderLogs(panel);
 
   try {
-    const result = await Editor.Message.request(PACKAGE_NAME, "append-log", log);
+    const result = await requestMain("append-log", log);
     runtimeLogs = result.logs || runtimeLogs;
     renderLogs(panel);
   } catch (error) {
@@ -1020,7 +1037,7 @@ async function addLog(panel, level, message, detail = "") {
 
 async function clearLogs(panel) {
   try {
-    const result = await Editor.Message.request(PACKAGE_NAME, "clear-logs");
+    const result = await requestMain("clear-logs");
     runtimeLogs = result.logs || [];
     renderLogs(panel);
     setStatus(panel, "运行日志已清空。");
@@ -1047,7 +1064,7 @@ async function scanAssetReport(panel) {
   setBusy(panel, true);
   setStatus(panel, "正在扫描资源异常和类型统计...");
   try {
-    const result = await Editor.Message.request(PACKAGE_NAME, "scan-assets", {
+    const result = await requestMain("scan-assets", {
       search: panel.$.assetScanSearchInput.value,
       extensions: panel.$.assetScanExtensionInput.value,
       directory: panel.$.assetScanDirectoryInput.value
@@ -1057,7 +1074,7 @@ async function scanAssetReport(panel) {
     scanTypeStats = result.typeStats || [];
     scanReportSummary = result.summary || null;
     if (!isCompleteAssetScanResult(result)) {
-      const message = "资源扫描接口返回旧结构或字段不完整。请在扩展管理器重载 project-asset-mover 后重新打开面板。";
+      const message = "资源扫描接口返回旧结构或字段不完整。请在扩展管理器重载 asset-steward 后重新打开面板。";
       await addLog(panel, "warning", message, JSON.stringify(result?.summary || {}, null, 2));
       scanResourceEntries = [];
       scanIssues = [];
@@ -1166,7 +1183,7 @@ async function checkReferences(panel) {
   setBusy(panel, true);
   setStatus(panel, "正在静态搜索资源 UUID 引用...");
   try {
-    const result = await Editor.Message.request(PACKAGE_NAME, "check-references", {
+    const result = await requestMain("check-references", {
       path: panel.$.referenceTargetInput.value,
       directory: panel.$.referenceDirectoryInput.value,
       extensions: panel.$.referenceExtensionInput.value
@@ -1175,7 +1192,7 @@ async function checkReferences(panel) {
     referenceRows = result.references || [];
     referenceSummary = result.summary || null;
     if (!isCompleteReferenceResult(result)) {
-      const message = "引用检查接口返回旧结构或字段不完整。请重载 project-asset-mover 后重新检查。";
+      const message = "引用检查接口返回旧结构或字段不完整。请重载 asset-steward 后重新检查。";
       await addLog(panel, "warning", message, JSON.stringify(result?.summary || {}, null, 2));
       referenceTargets = [];
       referenceRows = [];
@@ -1277,7 +1294,7 @@ async function selectReferenceNode(panel, path, detail) {
     return;
   }
   try {
-    await Editor.Message.request(PACKAGE_NAME, "select-reference-node", {
+    await requestMain("select-reference-node", {
       path,
       nodeUuid: detail.nodeUuid,
       nodePath: detail.nodePath
@@ -1292,7 +1309,7 @@ async function checkNodeReferences(panel) {
   setBusy(panel, true);
   setStatus(panel, "正在检查场景节点被哪些组件引用...");
   try {
-    const result = await Editor.Message.request(PACKAGE_NAME, "check-node-references", {
+    const result = await requestMain("check-node-references", {
       nodeUuid: panel.$.nodeReferenceUuidInput.value,
       directory: panel.$.nodeReferenceDirectoryInput.value,
       extensions: panel.$.nodeReferenceExtensionInput.value
@@ -1304,7 +1321,7 @@ async function checkNodeReferences(panel) {
       panel.$.nodeReferenceUuidInput.value = result.nodeUuid;
     }
     if (!isCompleteNodeReferenceResult(result)) {
-      const message = "节点引用检查接口返回旧结构或字段不完整。请重载 project-asset-mover 后重新检查。";
+      const message = "节点引用检查接口返回旧结构或字段不完整。请重载 asset-steward 后重新检查。";
       resetNodeReferenceResult();
       renderNodeReferences(panel);
       await addLog(panel, "warning", message, JSON.stringify(result?.summary || {}, null, 2));
@@ -1401,7 +1418,7 @@ async function scanUnusedAssets(panel) {
   setBusy(panel, true);
   setStatus(panel, "正在从主场景递归依赖图扫描未引用候选...");
   try {
-    const result = await Editor.Message.request(PACKAGE_NAME, "scan-unused-assets", {
+    const result = await requestMain("scan-unused-assets", {
       scene: panel.$.unusedSceneInput.value,
       directory: panel.$.unusedDirectoryInput.value
     });
@@ -1410,7 +1427,7 @@ async function scanUnusedAssets(panel) {
     unusedSelectedPaths = new Set();
     unusedDeletePlan = null;
     if (!isCompleteUnusedResult(result)) {
-      const message = "未引用资源扫描接口返回旧结构或字段不完整。请重载 project-asset-mover 后重新扫描。";
+      const message = "未引用资源扫描接口返回旧结构或字段不完整。请重载 asset-steward 后重新扫描。";
       resetUnusedResult();
       renderUnusedCandidates(panel);
       await addLog(panel, "warning", message, JSON.stringify(result?.summary || {}, null, 2));
@@ -1507,7 +1524,7 @@ async function previewUnusedDelete(panel) {
   setBusy(panel, true);
   setStatus(panel, "正在重新校验未引用候选并生成删除预览...");
   try {
-    unusedDeletePlan = await Editor.Message.request(PACKAGE_NAME, "preview-unused-delete", {
+    unusedDeletePlan = await requestMain("preview-unused-delete", {
       scene: panel.$.unusedSceneInput.value,
       directory: panel.$.unusedDirectoryInput.value,
       backupScope: panel.$.unusedDeleteBackupScopeSelect.value,
@@ -1568,11 +1585,11 @@ async function executeUnusedDelete(panel) {
   setBusy(panel, true);
   setStatus(panel, "正在创建备份并删除未引用候选...");
   try {
-    const result = await Editor.Message.request(PACKAGE_NAME, "execute-unused-delete", {
+    const result = await requestMain("execute-unused-delete", {
       token: unusedDeletePlan.token,
       confirmed: true
     });
-    const message = `未引用删除完成：备份 ${result.backup.fileCount} 个文件到 ${result.backup.backupDirectory}；删除成功 ${result.deleted.length} 项，失败 ${result.failed.length} 项。`;
+    const message = `未引用删除完成：备份 ${result.backup.fileCount} 个文件到 ${result.backup.backupDirectory}；删除成功 ${result.deleted.length} 项，失败 ${result.failed.length} 项；审计 ${result.auditPath || "-"}。`;
     await addLog(panel, result.failed.length ? "warning" : "info", message, JSON.stringify(result, null, 2));
     unusedDeletePlan = null;
     unusedSelectedPaths = new Set();
@@ -1591,7 +1608,7 @@ async function checkResourcesRuntime(panel) {
   setBusy(panel, true);
   setStatus(panel, "正在对照 resources 资源和代码静态加载路径...");
   try {
-    const result = await Editor.Message.request(PACKAGE_NAME, "check-resources-runtime", {
+    const result = await requestMain("check-resources-runtime", {
       codeDirectories: panel.$.resourcesCodeDirectoriesInput.value,
       resourcesDirectory: panel.$.resourcesDirectoryInput.value
     });
@@ -1601,7 +1618,7 @@ async function checkResourcesRuntime(panel) {
     resourcesRuntimeDynamicCalls = result.dynamicCalls || [];
     resourcesRuntimeSummary = result.summary || null;
     if (!isCompleteResourcesRuntimeResult(result)) {
-      const message = "resources 动态加载检查接口返回旧结构或字段不完整。请重载 project-asset-mover 后重新检查。";
+      const message = "resources 动态加载检查接口返回旧结构或字段不完整。请重载 asset-steward 后重新检查。";
       resetResourcesRuntimeResult();
       renderResourcesRuntime(panel);
       await addLog(panel, "warning", message, JSON.stringify(result?.summary || {}, null, 2));
@@ -1712,7 +1729,7 @@ async function reportPackageSize(panel) {
   setBusy(panel, true);
   setStatus(panel, "正在统计源资源体积贡献...");
   try {
-    const result = await Editor.Message.request(PACKAGE_NAME, "report-package-size", {
+    const result = await requestMain("report-package-size", {
       directory: panel.$.packageSizeDirectoryInput.value,
       scene: panel.$.packageSizeSceneInput.value,
       topN: panel.$.packageSizeTopNInput.value,
@@ -1724,7 +1741,7 @@ async function reportPackageSize(panel) {
     packageReferencedTopFiles = result.referencedTopFiles || [];
     packageSizeSummary = result.summary || null;
     if (!isCompletePackageSizeResult(result)) {
-      const message = "包体贡献统计接口返回旧结构或字段不完整。请重载 project-asset-mover 后重新统计。";
+      const message = "包体贡献统计接口返回旧结构或字段不完整。请重载 asset-steward 后重新统计。";
       resetPackageSizeResult();
       renderPackageSize(panel);
       await addLog(panel, "warning", message, JSON.stringify(result?.summary || {}, null, 2));
@@ -1843,14 +1860,14 @@ async function checkDirectoryConvention(panel) {
   setBusy(panel, true);
   setStatus(panel, "正在按当前自动分类规则检查目录规范...");
   try {
-    const result = await Editor.Message.request(PACKAGE_NAME, "check-directory-convention", {
+    const result = await requestMain("check-directory-convention", {
       directory: panel.$.directoryConventionInput.value,
       rules
     });
     directoryConventionMismatches = result.mismatches || [];
     directoryConventionSummary = result.summary || null;
     if (!isCompleteDirectoryConventionResult(result)) {
-      const message = "目录规范检查接口返回旧结构或字段不完整。请重载 project-asset-mover 后重新检查。";
+      const message = "目录规范检查接口返回旧结构或字段不完整。请重载 asset-steward 后重新检查。";
       resetDirectoryConventionResult();
       renderDirectoryConvention(panel);
       await addLog(panel, "warning", message, JSON.stringify(result?.summary || {}, null, 2));
@@ -1913,7 +1930,7 @@ async function previewDirectoryConvention(panel) {
     selectedPaths = new Set(directoryConventionMismatches.map((item) => item.path));
     panel.$.backupConfirmed.checked = false;
     updateMode(panel);
-    currentPlan = await Editor.Message.request(PACKAGE_NAME, "preview-moves", {
+    currentPlan = await requestMain("preview-moves", {
       mode: "rules",
       paths: [...selectedPaths],
       ruleScope: "selected",
@@ -1936,14 +1953,14 @@ async function checkMaterialTextures(panel) {
   setBusy(panel, true);
   setStatus(panel, "正在检查材质贴图 UUID 关系...");
   try {
-    const result = await Editor.Message.request(PACKAGE_NAME, "check-material-textures", {
+    const result = await requestMain("check-material-textures", {
       directory: panel.$.materialTextureDirectoryInput.value,
       scene: panel.$.materialTextureSceneInput.value
     });
     materialTextureReferences = result.references || [];
     materialTextureSummary = result.summary || null;
     if (!isCompleteMaterialTextureResult(result)) {
-      const message = "材质贴图检查接口返回旧结构或字段不完整。请重载 project-asset-mover 后重新检查。";
+      const message = "材质贴图检查接口返回旧结构或字段不完整。请重载 asset-steward 后重新检查。";
       resetMaterialTextureResult();
       renderMaterialTextures(panel);
       await addLog(panel, "warning", message, JSON.stringify(result?.summary || {}, null, 2));
@@ -2000,14 +2017,14 @@ async function checkDuplicateAssets(panel) {
   setBusy(panel, true);
   setStatus(panel, "正在检查同名资源和重复内容...");
   try {
-    const result = await Editor.Message.request(PACKAGE_NAME, "check-duplicate-assets", {
+    const result = await requestMain("check-duplicate-assets", {
       directory: panel.$.duplicateAssetDirectoryInput.value
     });
     duplicateSameNameGroups = result.sameNameGroups || [];
     duplicateHashGroups = result.duplicateHashGroups || [];
     duplicateAssetSummary = result.summary || null;
     if (!isCompleteDuplicateAssetResult(result)) {
-      const message = "重复资源检查接口返回旧结构或字段不完整。请重载 project-asset-mover 后重新检查。";
+      const message = "重复资源检查接口返回旧结构或字段不完整。请重载 asset-steward 后重新检查。";
       resetDuplicateAssetResult();
       renderDuplicateAssets(panel);
       await addLog(panel, "warning", message, JSON.stringify(result?.summary || {}, null, 2));
@@ -2071,7 +2088,7 @@ async function checkScenePrefabReferenceHealth(panel) {
   setBusy(panel, true);
   setStatus(panel, "正在检查场景和 Prefab UUID 引用...");
   try {
-    const result = await Editor.Message.request(PACKAGE_NAME, "check-scene-prefab-reference-health", {
+    const result = await requestMain("check-scene-prefab-reference-health", {
       directory: panel.$.scenePrefabHealthDirectoryInput.value,
       extensions: panel.$.scenePrefabHealthExtensionInput.value,
       whitelist: panel.$.scenePrefabHealthWhitelistInput.value
@@ -2079,7 +2096,7 @@ async function checkScenePrefabReferenceHealth(panel) {
     scenePrefabReferenceIssues = result.issues || [];
     scenePrefabReferenceSummary = result.summary || null;
     if (!isCompleteScenePrefabReferenceHealthResult(result)) {
-      const message = "场景和 Prefab 引用健康接口返回旧结构或字段不完整。请重载 project-asset-mover 后重新检查。";
+      const message = "场景和 Prefab 引用健康接口返回旧结构或字段不完整。请重载 asset-steward 后重新检查。";
       resetScenePrefabReferenceHealthResult();
       renderScenePrefabReferenceHealth(panel);
       await addLog(panel, "warning", message, JSON.stringify(result?.summary || {}, null, 2));
@@ -2133,7 +2150,7 @@ async function scan(panel) {
   invalidatePlan(panel);
   setStatus(panel, "正在扫描 assets...");
   try {
-    const result = await Editor.Message.request(PACKAGE_NAME, "scan-assets", {
+    const result = await requestMain("scan-assets", {
       search: panel.$.searchInput.value,
       extensions: panel.$.extensionInput.value
     });
@@ -2283,7 +2300,7 @@ function addRule(panel) {
 
 async function saveRules(panel) {
   try {
-    const result = await Editor.Message.request(PACKAGE_NAME, "save-rules", { rules });
+    const result = await requestMain("save-rules", { rules });
     rules = result.rules;
     renderRules(panel);
     setStatus(panel, `规则已保存到 ${result.profilePath}`);
@@ -2305,7 +2322,7 @@ async function preview(panel) {
   setBusy(panel, true);
   setStatus(panel, "正在生成移动预览...");
   try {
-    currentPlan = await Editor.Message.request(PACKAGE_NAME, "preview-moves", {
+    currentPlan = await requestMain("preview-moves", {
       mode: panel.$.modeSelect.value,
       paths: [...selectedPaths],
       targetDirectory: panel.$.targetDirectorySelect.value,
@@ -2333,7 +2350,7 @@ async function previewReverse(panel) {
 
   setBusy(panel, true);
   try {
-    currentPlan = await Editor.Message.request(PACKAGE_NAME, "preview-reverse", {
+    currentPlan = await requestMain("preview-reverse", {
       historyId,
       conflictPolicy: panel.$.conflictPolicySelect.value
     });
@@ -2393,7 +2410,7 @@ async function execute(panel) {
   setBusy(panel, true);
   setStatus(panel, "正在执行移动，请勿同时在资源管理器操作这些资源...");
   try {
-    const result = await Editor.Message.request(PACKAGE_NAME, "execute-moves", {
+    const result = await requestMain("execute-moves", {
       token: currentPlan.token,
       backupConfirmed: panel.$.backupConfirmed.checked,
       cleanupEmptyDirectories: panel.$.cleanupEmptyDirectories.checked
@@ -2429,7 +2446,7 @@ function renderHistory(panel) {
 
 async function locate(panel, path) {
   try {
-    await Editor.Message.request(PACKAGE_NAME, "locate-asset", { path });
+    await requestMain("locate-asset", { path });
     setStatus(panel, `已在资源管理器定位：${path}`);
   } catch (error) {
     setStatus(panel, `定位失败：${error.message}`);

@@ -1,16 +1,19 @@
 {
   "package_version": 2,
   "version": "1.13.0",
-  "name": "project-asset-mover",
-  "description": "项目资源扫描、分类、移动和报告工具箱",
+  "name": "asset-steward",
+  "description": "项目资源扫描、治理、分类、清理和报告管家",
   "main": "./main.js",
   "editor": ">=3.8.0",
   "author": "project",
+  "scripts": {
+    "test": "node --test"
+  },
   "contributions": {
     "menu": [
       {
-        "path": "项目资源工具箱",
-        "label": "打开工具箱",
+        "path": "项目资源管家",
+        "label": "打开资源管家",
         "message": "open-panel"
       }
     ],
@@ -156,7 +159,7 @@
   },
   "panels": {
     "main": {
-      "title": "项目资源工具箱",
+      "title": "项目资源管家",
       "main": "./panel/main.js",
       "type": "dockable",
       "size": {
