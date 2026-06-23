@@ -66,14 +66,39 @@ let unusedCandidates = [];
 let unusedSummary = null;
 let unusedSelectedPaths = new Set();
 let unusedDeletePlan = null;
+let toolVisibility = {};
+
+const RESIZABLE_SPLIT_STORAGE_KEY = "asset-steward.resizableSplits.v1";
+const RESIZABLE_SPLIT_MIN_LEFT = 260;
+const RESIZABLE_SPLIT_MIN_RIGHT = 260;
+const TOOL_PANEL_MODULES = [
+  { id: "scene-node-reference-check", title: "场景节点引用检查", group: "健康检查", selector: '[data-tool-module="scene-node-reference-check"]' },
+  { id: "resources-runtime-check", title: "resources 动态加载检查", group: "健康检查", selector: '[data-tool-module="resources-runtime-check"]' },
+  { id: "package-size-report", title: "包体贡献统计", group: "健康检查", selector: '[data-tool-module="package-size-report"]' },
+  { id: "directory-convention", title: "目录规范检查", group: "健康检查", selector: '[data-tool-module="directory-convention"]' },
+  { id: "material-textures", title: "材质贴图检查", group: "健康检查", selector: '[data-tool-module="material-textures"]' },
+  { id: "duplicate-assets", title: "重复资源检查", group: "健康检查", selector: '[data-tool-module="duplicate-assets"]' },
+  { id: "scene-prefab-reference-health", title: "场景和 Prefab 引用健康", group: "健康检查", selector: '[data-tool-module="scene-prefab-reference-health"]' }
+];
 
 exports.template = `
 <section class="root">
   <header class="toolbox-header">
-    <div>
-      <h2>项目资源管家</h2>
-      <p>资源扫描、自动分类、未引用资源、健康检查和历史报告的治理入口。</p>
+    <div class="toolbox-title-row">
+      <div>
+        <h2>项目资源管家</h2>
+        <p>资源扫描、自动分类、未引用资源、健康检查和历史报告的治理入口。</p>
+      </div>
+      <button id="toolPanelToggleButton">工具面板</button>
     </div>
+    <section id="toolPanel" class="tool-panel hidden">
+      <header class="tool-panel-header">
+        <h3>功能开关</h3>
+        <button id="toolPanelEnableAllButton">全部开启</button>
+      </header>
+      <div id="toolPanelRows" class="tool-panel-rows"></div>
+      <div class="hint">关闭后对应功能块会从页面隐藏，配置保存到项目 profile。</div>
+    </section>
     <nav id="tabBar" class="tab-bar">
       <button class="tab-button" data-tab="scan">资源扫描</button>
       <button class="tab-button active" data-tab="classify">自动分类</button>
@@ -88,6 +113,7 @@ exports.template = `
       <label><span>搜索路径</span><input id="assetScanSearchInput" placeholder="例如 prefab / Fish"></label>
       <label><span>扩展名</span><input id="assetScanExtensionInput" placeholder=".prefab,.fbx"></label>
       <label><span>扫描目录</span><input id="assetScanDirectoryInput" value="assets" placeholder="assets 或 assets/res"></label>
+      <label><span>异常忽略</span><input id="assetScanIssueIgnoreInput" value=".gitkeep" placeholder=".gitkeep；多个用逗号分隔"></label>
       <button id="assetScanButton">扫描资源</button>
     </header>
 
@@ -104,7 +130,7 @@ exports.template = `
       </div>
     </section>
 
-    <div class="scan-workspace">
+    <div class="scan-workspace resizable-split" data-resize-id="scan-issues">
       <section class="asset-section">
         <h3>异常列表</h3>
         <div class="table-wrap">
@@ -115,6 +141,7 @@ exports.template = `
           <div id="assetScanIssueEmpty" class="empty">点击“扫描资源”读取缺失 meta、孤立 meta 和空目录。</div>
         </div>
       </section>
+      <div class="resize-handle" data-resize-handle title="拖拽调整宽度"></div>
 
       <section class="asset-section">
         <h3>类型统计</h3>
@@ -134,10 +161,11 @@ exports.template = `
         <label class="wide-field"><span>被检查资源</span><input id="referenceTargetInput" placeholder="assets/res/prefab/Prefab_Player.prefab；多个用逗号分隔"></label>
         <label><span>扫描目录</span><input id="referenceDirectoryInput" value="assets" placeholder="assets"></label>
         <label><span>引用类型</span><input id="referenceExtensionInput" value=".scene,.prefab,.mtl,.material,.anim,.effect"></label>
+        <button id="referenceSelectedAssetButton">定位资源查引用</button>
         <button id="referenceCheckButton">检查引用</button>
       </header>
       <div class="summary" id="referenceSummary">静态搜索目标资源 UUID。未找到引用不等于可删除，还需要人工复核动态加载。</div>
-      <div class="reference-workspace">
+      <div class="reference-workspace resizable-split" data-resize-id="reference">
         <section class="asset-section">
           <h3>目标 UUID</h3>
           <div class="table-wrap">
@@ -148,6 +176,7 @@ exports.template = `
             <div id="referenceTargetEmpty" class="empty">输入资源路径后点击“检查引用”。</div>
           </div>
         </section>
+        <div class="resize-handle" data-resize-handle title="拖拽调整宽度"></div>
         <section class="asset-section">
           <h3>引用方</h3>
           <div class="table-wrap">
@@ -173,7 +202,7 @@ exports.template = `
 
     <div class="summary" id="scanSummary">尚未扫描。</div>
 
-    <div class="workspace">
+    <div class="workspace resizable-split" data-resize-id="classify">
       <section class="asset-section">
         <h3>资源列表</h3>
         <div class="table-wrap">
@@ -184,6 +213,7 @@ exports.template = `
           <div id="assetEmpty" class="empty">点击“扫描 assets”读取项目资源。</div>
         </div>
       </section>
+      <div class="resize-handle" data-resize-handle title="拖拽调整宽度"></div>
 
       <aside class="settings">
         <h3>移动设置</h3>
@@ -277,7 +307,7 @@ exports.template = `
   </section>
 
   <section id="healthTab" class="tab-page">
-    <section class="node-reference-panel">
+    <section class="node-reference-panel" data-tool-module="scene-node-reference-check">
       <h3>场景节点引用检查</h3>
       <header class="toolbar">
         <label class="wide-field"><span>节点 ID</span><input id="nodeReferenceUuidInput" placeholder="留空时使用当前选中节点"></label>
@@ -286,7 +316,7 @@ exports.template = `
         <button id="nodeReferenceCheckButton">检查节点引用</button>
       </header>
       <div class="summary" id="nodeReferenceSummary">根据目标节点 ID 反查哪些组件属性引用了它；只报告，不修改场景。</div>
-      <div class="node-reference-grid">
+      <div class="node-reference-grid resizable-split" data-resize-id="node-reference">
         <section class="asset-section">
           <h3>目标节点</h3>
           <div class="table-wrap node-reference-table">
@@ -297,6 +327,7 @@ exports.template = `
             <div id="nodeReferenceTargetEmpty" class="empty">检查后显示扫描范围内匹配的目标节点。</div>
           </div>
         </section>
+        <div class="resize-handle" data-resize-handle title="拖拽调整宽度"></div>
         <section class="asset-section">
           <h3>引用组件</h3>
           <div class="table-wrap node-reference-table">
@@ -309,7 +340,7 @@ exports.template = `
         </section>
       </div>
     </section>
-    <section class="resources-runtime-panel">
+    <section class="resources-runtime-panel" data-tool-module="resources-runtime-check">
       <h3>resources 动态加载检查</h3>
       <header class="toolbar">
         <label class="wide-field"><span>代码扫描目录</span><input id="resourcesCodeDirectoriesInput" value="assets/script,assets/scripts"></label>
@@ -317,7 +348,7 @@ exports.template = `
         <button id="resourcesRuntimeCheckButton">运行检查</button>
       </header>
       <div class="summary" id="resourcesRuntimeSummary">只静态检查 resources.load/loadDir；变量、拼接路径和封装调用需要人工复核。</div>
-      <div class="resources-runtime-grid">
+      <div class="resources-runtime-grid resizable-split" data-resize-id="resources-runtime">
         <section class="asset-section">
           <h3>疑似未加载资源</h3>
           <div class="table-wrap">
@@ -328,6 +359,7 @@ exports.template = `
             <div id="resourcesUnusedEmpty" class="empty">运行检查后显示未被静态路径命中的 resources 资源。</div>
           </div>
         </section>
+        <div class="resize-handle" data-resize-handle title="拖拽调整宽度"></div>
         <section class="asset-section">
           <h3>加载调用</h3>
           <div class="table-wrap">
@@ -350,7 +382,7 @@ exports.template = `
         </div>
       </details>
     </section>
-    <section class="package-size-panel">
+    <section class="package-size-panel" data-tool-module="package-size-report">
       <h3>包体贡献统计</h3>
       <header class="toolbar">
         <label><span>扫描目录</span><input id="packageSizeDirectoryInput" value="assets"></label>
@@ -404,7 +436,7 @@ exports.template = `
         </div>
       </section>
     </section>
-    <section class="directory-convention-panel">
+    <section class="directory-convention-panel" data-tool-module="directory-convention">
       <h3>目录规范检查</h3>
       <header class="toolbar">
         <label><span>扫描目录</span><input id="directoryConventionInput" value="assets/res"></label>
@@ -420,7 +452,7 @@ exports.template = `
         <div id="directoryConventionEmpty" class="empty">检查后显示目录不符合当前自动分类规则的资源。</div>
       </div>
     </section>
-    <section class="material-texture-panel">
+    <section class="material-texture-panel" data-tool-module="material-textures">
       <h3>材质贴图检查</h3>
       <header class="toolbar">
         <label><span>扫描目录</span><input id="materialTextureDirectoryInput" value="assets/res"></label>
@@ -436,14 +468,14 @@ exports.template = `
         <div id="materialTextureEmpty" class="empty">检查后同时显示正常材质贴图关系和待复核项。</div>
       </div>
     </section>
-    <section class="duplicate-asset-panel">
+    <section class="duplicate-asset-panel" data-tool-module="duplicate-assets">
       <h3>重复资源检查</h3>
       <header class="toolbar">
         <label><span>扫描目录</span><input id="duplicateAssetDirectoryInput" value="assets/res"></label>
         <button id="duplicateAssetCheckButton">检查重复资源</button>
       </header>
       <div class="summary" id="duplicateAssetSummary">检查不同目录同名资源和 SHA-256 相同内容；只报告和定位，不自动删除。</div>
-      <div class="duplicate-asset-grid">
+      <div class="duplicate-asset-grid resizable-split" data-resize-id="duplicate-assets">
         <section class="asset-section">
           <h3>同名资源组</h3>
           <div class="table-wrap duplicate-asset-table">
@@ -454,6 +486,7 @@ exports.template = `
             <div id="duplicateSameNameEmpty" class="empty">检查后显示不同目录下的同名资源。</div>
           </div>
         </section>
+        <div class="resize-handle" data-resize-handle title="拖拽调整宽度"></div>
         <section class="asset-section">
           <h3>重复内容组</h3>
           <div class="table-wrap duplicate-asset-table">
@@ -466,7 +499,7 @@ exports.template = `
         </section>
       </div>
     </section>
-    <section class="scene-prefab-health-panel">
+    <section class="scene-prefab-health-panel" data-tool-module="scene-prefab-reference-health">
       <h3>场景和 Prefab 引用健康</h3>
       <header class="toolbar">
         <label><span>扫描目录</span><input id="scenePrefabHealthDirectoryInput" value="assets"></label>
@@ -535,8 +568,17 @@ exports.template = `
 exports.style = `
 .root { box-sizing: border-box; color: #ddd; display: flex; flex-direction: column; font-size: 12px; height: 100%; padding: 10px; }
 .toolbox-header { border-bottom: 1px solid #444; margin-bottom: 10px; padding-bottom: 8px; }
+.toolbox-title-row { align-items: flex-start; display: flex; gap: 12px; justify-content: space-between; }
 .toolbox-header h2 { color: #f2f2f2; font-size: 16px; margin: 0 0 4px; }
 .toolbox-header p { color: #aaa; margin: 0 0 8px; }
+.tool-panel { background: #242424; border: 1px solid #444; margin: 8px 0; padding: 8px; }
+.tool-panel-header { align-items: center; display: flex; justify-content: space-between; margin-bottom: 6px; }
+.tool-panel-header h3 { color: #eee; font-size: 13px; margin: 0; }
+.tool-panel-rows { display: grid; gap: 6px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.tool-panel-row { align-items: center; border: 1px solid #3b3b3b; display: flex; gap: 7px; min-height: 28px; padding: 4px 6px; }
+.tool-panel-row input { height: auto; }
+.tool-panel-row span { color: #ddd; }
+.tool-panel-row small { color: #999; margin-left: auto; }
 .tab-bar { align-items: center; display: flex; gap: 6px; }
 .tab-button.active { background: #315273; border-color: #4b7ba7; color: #fff; }
 .tab-page { display: none; flex: 1; min-height: 0; }
@@ -553,12 +595,12 @@ button:disabled { cursor: default; opacity: .45; }
 .primary { background: #315273; border-color: #4b7ba7; }
 .danger { background: #653333; border-color: #9b4c4c; }
 .summary, .plan-summary { color: #bcdcff; min-height: 20px; padding: 4px 0; }
-.workspace { display: grid; flex: 1; gap: 10px; grid-template-columns: minmax(560px, 1fr) 360px; min-height: 260px; }
-.scan-workspace { display: grid; flex: 1; gap: 10px; grid-template-columns: minmax(560px, 1fr) 360px; min-height: 0; }
+.workspace { display: grid; flex: 1; gap: 10px; grid-template-columns: var(--split-left, minmax(560px, 1fr)) 8px minmax(280px, 360px); min-height: 260px; }
+.scan-workspace { display: grid; flex: 1; gap: 10px; grid-template-columns: var(--split-left, minmax(560px, 1fr)) 8px minmax(280px, 360px); min-height: 0; }
 .scan-resource-section { flex: 0 0 180px; margin-bottom: 10px; }
 .reference-section { border: 1px solid #444; box-sizing: border-box; flex: 0 0 255px; margin-top: 10px; min-height: 0; padding: 8px; }
 .reference-section > h3 { color: #eee; font-size: 13px; margin: 0 0 8px; }
-.reference-workspace { display: grid; gap: 10px; grid-template-columns: minmax(420px, 1fr) minmax(520px, 1.2fr); height: 170px; min-height: 0; }
+.reference-workspace { display: grid; gap: 10px; grid-template-columns: var(--split-left, minmax(420px, 1fr)) 8px minmax(420px, 1.2fr); height: 170px; min-height: 0; }
 .wide-field input { width: 360px; }
 .asset-section, .settings, .plan-section { border: 1px solid #444; box-sizing: border-box; min-height: 0; padding: 8px; }
 .asset-section { display: flex; flex-direction: column; }
@@ -599,7 +641,7 @@ th { background: #252525; position: sticky; top: 0; z-index: 1; }
 .feature-card p { color: #bdbdbd; line-height: 1.6; margin: 0; }
 .warning-card { border-color: #8a6838; }
 .resources-runtime-panel { flex: 0 0 auto; margin-bottom: 10px; }
-.resources-runtime-grid { display: grid; gap: 10px; grid-template-columns: minmax(360px, 0.9fr) minmax(520px, 1.4fr); height: 250px; }
+.resources-runtime-grid { display: grid; gap: 10px; grid-template-columns: var(--split-left, minmax(360px, .9fr)) 8px minmax(420px, 1.4fr); height: 250px; }
 .resources-all-details { margin-top: 10px; }
 .resources-all-details summary { color: #bcdcff; cursor: pointer; }
 .resources-all-table { height: 180px; margin-top: 8px; }
@@ -613,7 +655,7 @@ th { background: #252525; position: sticky; top: 0; z-index: 1; }
 .material-texture-panel { flex: 0 0 auto; margin-bottom: 10px; }
 .material-texture-table { height: 320px; }
 .duplicate-asset-panel { flex: 0 0 auto; margin-bottom: 10px; }
-.duplicate-asset-grid { display: grid; gap: 10px; grid-template-columns: 1fr 1fr; height: 340px; }
+.duplicate-asset-grid { display: grid; gap: 10px; grid-template-columns: var(--split-left, 1fr) 8px 1fr; height: 340px; }
 .duplicate-asset-table { height: 300px; }
 .scene-prefab-health-panel { flex: 0 0 auto; margin-bottom: 10px; }
 .scene-prefab-health-table { height: 320px; }
@@ -626,7 +668,7 @@ th { background: #252525; position: sticky; top: 0; z-index: 1; }
 .inline-check input { height: auto; }
 #healthTab { overflow: auto; }
 .node-reference-panel { flex: 0 0 auto; margin-bottom: 10px; }
-.node-reference-grid { display: grid; gap: 10px; grid-template-columns: minmax(360px, .9fr) minmax(560px, 1.4fr); height: 260px; }
+.node-reference-grid { display: grid; gap: 10px; grid-template-columns: var(--split-left, minmax(360px, .9fr)) 8px minmax(420px, 1.4fr); height: 260px; }
 .node-reference-table { height: 220px; }
 .history-panel { max-width: 720px; }
 .history-panel label { justify-content: space-between; margin-bottom: 8px; }
@@ -636,10 +678,18 @@ th { background: #252525; position: sticky; top: 0; z-index: 1; }
 .report-panel { margin-top: 10px; max-width: none; }
 .log-panel { margin-top: 10px; max-width: none; }
 .log-table { height: 220px; }
+.resize-handle { align-self: stretch; background: #343434; border-left: 1px solid #4a4a4a; border-right: 1px solid #242424; cursor: col-resize; min-height: 100%; touch-action: none; user-select: none; }
+.resize-handle:hover, .resize-handle.dragging { background: #4b7ba7; border-left-color: #6da2cf; }
+.resizable-split > .asset-section, .resizable-split > .settings { min-width: 0; }
+body.resizing-split { cursor: col-resize; user-select: none; }
 footer { color: #ffcf7a; min-height: 22px; padding-top: 7px; }
 `;
 
 exports.$ = {
+  toolPanelToggleButton: "#toolPanelToggleButton",
+  toolPanelEnableAllButton: "#toolPanelEnableAllButton",
+  toolPanel: "#toolPanel",
+  toolPanelRows: "#toolPanelRows",
   tabBar: "#tabBar",
   scanTab: "#scanTab",
   classifyTab: "#classifyTab",
@@ -649,6 +699,7 @@ exports.$ = {
   assetScanSearchInput: "#assetScanSearchInput",
   assetScanExtensionInput: "#assetScanExtensionInput",
   assetScanDirectoryInput: "#assetScanDirectoryInput",
+  assetScanIssueIgnoreInput: "#assetScanIssueIgnoreInput",
   assetScanButton: "#assetScanButton",
   assetScanSummary: "#assetScanSummary",
   assetScanResourceRows: "#assetScanResourceRows",
@@ -660,6 +711,7 @@ exports.$ = {
   referenceTargetInput: "#referenceTargetInput",
   referenceDirectoryInput: "#referenceDirectoryInput",
   referenceExtensionInput: "#referenceExtensionInput",
+  referenceSelectedAssetButton: "#referenceSelectedAssetButton",
   referenceCheckButton: "#referenceCheckButton",
   referenceSummary: "#referenceSummary",
   referenceTargetRows: "#referenceTargetRows",
@@ -785,7 +837,11 @@ exports.ready = async function () {
   panel.$.tabBar.querySelectorAll(".tab-button").forEach((button) => {
     button.addEventListener("click", () => activateTab(panel, button.dataset.tab));
   });
+  initializeResizableSplits();
+  panel.$.toolPanelToggleButton.addEventListener("click", () => toggleToolPanel(panel));
+  panel.$.toolPanelEnableAllButton.addEventListener("click", () => enableAllTools(panel));
   panel.$.assetScanButton.addEventListener("click", () => scanAssetReport(panel));
+  panel.$.referenceSelectedAssetButton.addEventListener("click", () => checkReferenceForSelectedAsset(panel));
   panel.$.referenceCheckButton.addEventListener("click", () => checkReferences(panel));
   panel.$.nodeReferenceCheckButton.addEventListener("click", () => checkNodeReferences(panel));
   panel.$.unusedScanButton.addEventListener("click", () => scanUnusedAssets(panel));
@@ -836,12 +892,196 @@ function activateTab(panel, tabName) {
   });
 }
 
+function normalizeToolVisibility(value) {
+  const source = value && typeof value === "object" ? value : {};
+  const visibility = {};
+  for (const module of TOOL_PANEL_MODULES) {
+    visibility[module.id] = source[module.id] !== false;
+  }
+  return visibility;
+}
+
+function isToolEnabled(id) {
+  return toolVisibility[id] !== false;
+}
+
+function toggleToolPanel(panel) {
+  panel.$.toolPanel.classList.toggle("hidden");
+}
+
+function renderToolPanel(panel) {
+  panel.$.toolPanelRows.innerHTML = "";
+  for (const module of TOOL_PANEL_MODULES) {
+    const row = document.createElement("label");
+    row.className = "tool-panel-row";
+    row.innerHTML = `
+      <input type="checkbox" ${isToolEnabled(module.id) ? "checked" : ""} data-tool-toggle="${escapeHtml(module.id)}">
+      <span>${escapeHtml(module.title)}</span>
+      <small>${escapeHtml(module.group)}</small>
+    `;
+    row.querySelector("input").addEventListener("change", (event) => updateToolVisibility(panel, module.id, event.target.checked));
+    panel.$.toolPanelRows.appendChild(row);
+  }
+}
+
+function applyToolVisibility(panel) {
+  for (const module of TOOL_PANEL_MODULES) {
+    const enabled = isToolEnabled(module.id);
+    document.querySelectorAll(module.selector).forEach((element) => {
+      element.classList.toggle("hidden", !enabled);
+    });
+  }
+}
+
+async function updateToolVisibility(panel, id, enabled) {
+  toolVisibility = normalizeToolVisibility({
+    ...toolVisibility,
+    [id]: enabled
+  });
+  renderToolPanel(panel);
+  applyToolVisibility(panel);
+  try {
+    const result = await requestMain("save-tool-visibility", { toolVisibility });
+    toolVisibility = normalizeToolVisibility(result.toolVisibility);
+    renderToolPanel(panel);
+    applyToolVisibility(panel);
+    setStatus(panel, `工具面板已保存：${TOOL_PANEL_MODULES.find((item) => item.id === id)?.title || id} ${enabled ? "开启" : "关闭"}。`);
+  } catch (error) {
+    setStatus(panel, `保存工具面板失败：${error.message}`);
+  }
+}
+
+async function enableAllTools(panel) {
+  const nextVisibility = {};
+  for (const module of TOOL_PANEL_MODULES) {
+    nextVisibility[module.id] = true;
+  }
+  toolVisibility = normalizeToolVisibility(nextVisibility);
+  renderToolPanel(panel);
+  applyToolVisibility(panel);
+  try {
+    const result = await requestMain("save-tool-visibility", { toolVisibility });
+    toolVisibility = normalizeToolVisibility(result.toolVisibility);
+    renderToolPanel(panel);
+    applyToolVisibility(panel);
+    setStatus(panel, "工具面板已全部开启。");
+  } catch (error) {
+    setStatus(panel, `保存工具面板失败：${error.message}`);
+  }
+}
+
+function initializeResizableSplits() {
+  const saved = loadResizableSplitState();
+  for (const split of document.querySelectorAll("[data-resize-id]")) {
+    const resizeId = split.dataset.resizeId;
+    if (saved[resizeId]) {
+      split.style.setProperty("--split-left", `${saved[resizeId]}px`);
+    }
+    const handle = split.querySelector("[data-resize-handle]");
+    if (!handle) {
+      continue;
+    }
+    handle.addEventListener("mousedown", (event) => startResizableSplitDrag(split, handle, event, "mouse"));
+    handle.addEventListener("touchstart", (event) => startResizableSplitDrag(split, handle, event, "touch"), { passive: false });
+  }
+}
+
+function loadResizableSplitState() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(RESIZABLE_SPLIT_STORAGE_KEY) || "{}");
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (_error) {
+    return {};
+  }
+}
+
+function saveResizableSplitWidth(resizeId, width) {
+  if (!resizeId) {
+    return;
+  }
+  const state = loadResizableSplitState();
+  state[resizeId] = Math.round(width);
+  try {
+    localStorage.setItem(RESIZABLE_SPLIT_STORAGE_KEY, JSON.stringify(state));
+  } catch (_error) {
+    // Resizable layout persistence is best-effort.
+  }
+}
+
+function startResizableSplitDrag(split, handle, event, mode) {
+  if (mode !== "touch" && event.button !== 0) {
+    return;
+  }
+  event.preventDefault();
+  handle.classList.add("dragging");
+  document.body?.classList.add("resizing-split");
+  const resizeId = split.dataset.resizeId || "";
+
+  const move = (moveEvent) => {
+    moveEvent.preventDefault?.();
+    const clientX = getResizeClientX(moveEvent);
+    if (!Number.isFinite(clientX)) {
+      return;
+    }
+    const splitRect = split.getBoundingClientRect();
+    const availableWidth = split.clientWidth;
+    const maxLeft = Math.max(RESIZABLE_SPLIT_MIN_LEFT, availableWidth - RESIZABLE_SPLIT_MIN_RIGHT);
+    const left = Math.min(
+      Math.max(RESIZABLE_SPLIT_MIN_LEFT, clientX - splitRect.left),
+      maxLeft
+    );
+    split.style.setProperty("--split-left", `${left}px`);
+  };
+  const up = () => {
+    const current = parseFloat(split.style.getPropertyValue("--split-left"));
+    if (Number.isFinite(current)) {
+      saveResizableSplitWidth(resizeId, current);
+    }
+    handle.classList.remove("dragging");
+    document.body?.classList.remove("resizing-split");
+    removeResizableSplitDragListeners(mode, move, up);
+  };
+
+  addResizableSplitDragListeners(mode, move, up);
+  move(event);
+}
+
+function getResizeClientX(event) {
+  const touch = event.touches?.[0] || event.changedTouches?.[0];
+  return touch ? touch.clientX : event.clientX;
+}
+
+function addResizableSplitDragListeners(mode, move, up) {
+  if (mode === "touch") {
+    document.addEventListener("touchmove", move, { passive: false });
+    document.addEventListener("touchend", up);
+    document.addEventListener("touchcancel", up);
+    return;
+  }
+  document.addEventListener("mousemove", move);
+  document.addEventListener("mouseup", up);
+}
+
+function removeResizableSplitDragListeners(mode, move, up) {
+  if (mode === "touch") {
+    document.removeEventListener("touchmove", move);
+    document.removeEventListener("touchend", up);
+    document.removeEventListener("touchcancel", up);
+    return;
+  }
+  document.removeEventListener("mousemove", move);
+  document.removeEventListener("mouseup", up);
+}
+
 async function loadState(panel) {
   try {
     const state = await requestMain("load-state");
     rules = state.rules || [];
     history = state.history || [];
+    toolVisibility = normalizeToolVisibility(state.toolVisibility);
     selectedHistoryDetail = null;
+    renderToolPanel(panel);
+    applyToolVisibility(panel);
     renderRules(panel);
     renderHistory(panel);
     renderHistoryDetail(panel);
@@ -896,38 +1136,52 @@ function buildSessionReportSnapshot() {
     targets: referenceTargets,
     references: referenceRows
   });
-  addSessionReportModule(modules, "scene-node-reference-check", "场景节点引用检查", nodeReferenceSummary, {
-    targets: nodeReferenceTargets,
-    references: nodeReferenceRows
-  });
+  if (isToolEnabled("scene-node-reference-check")) {
+    addSessionReportModule(modules, "scene-node-reference-check", "场景节点引用检查", nodeReferenceSummary, {
+      targets: nodeReferenceTargets,
+      references: nodeReferenceRows
+    });
+  }
   addSessionReportModule(modules, "scene-unused-assets", "未引用资源扫描", unusedSummary, {
     candidates: unusedCandidates
   });
-  addSessionReportModule(modules, "resources-runtime-check", "resources 动态加载检查", resourcesRuntimeSummary, {
-    resources: resourcesRuntimeResources,
-    staticCalls: resourcesRuntimeStaticCalls,
-    unusedResources: resourcesRuntimeUnused,
-    dynamicCalls: resourcesRuntimeDynamicCalls
-  });
-  addSessionReportModule(modules, "package-size-report", "包体贡献统计", packageSizeSummary, {
-    directoryRanking: packageDirectoryRanking,
-    typeRanking: packageTypeRanking,
-    topFiles: packageTopFiles,
-    referencedTopFiles: packageReferencedTopFiles
-  });
-  addSessionReportModule(modules, "directory-convention", "目录规范检查", directoryConventionSummary, {
-    mismatches: directoryConventionMismatches
-  });
-  addSessionReportModule(modules, "material-textures", "材质贴图检查", materialTextureSummary, {
-    references: materialTextureReferences
-  });
-  addSessionReportModule(modules, "duplicate-assets", "重复资源检查", duplicateAssetSummary, {
-    sameNameGroups: duplicateSameNameGroups,
-    duplicateHashGroups
-  });
-  addSessionReportModule(modules, "scene-prefab-reference-health", "场景和 Prefab 引用健康", scenePrefabReferenceSummary, {
-    issues: scenePrefabReferenceIssues
-  });
+  if (isToolEnabled("resources-runtime-check")) {
+    addSessionReportModule(modules, "resources-runtime-check", "resources 动态加载检查", resourcesRuntimeSummary, {
+      resources: resourcesRuntimeResources,
+      staticCalls: resourcesRuntimeStaticCalls,
+      unusedResources: resourcesRuntimeUnused,
+      dynamicCalls: resourcesRuntimeDynamicCalls
+    });
+  }
+  if (isToolEnabled("package-size-report")) {
+    addSessionReportModule(modules, "package-size-report", "包体贡献统计", packageSizeSummary, {
+      directoryRanking: packageDirectoryRanking,
+      typeRanking: packageTypeRanking,
+      topFiles: packageTopFiles,
+      referencedTopFiles: packageReferencedTopFiles
+    });
+  }
+  if (isToolEnabled("directory-convention")) {
+    addSessionReportModule(modules, "directory-convention", "目录规范检查", directoryConventionSummary, {
+      mismatches: directoryConventionMismatches
+    });
+  }
+  if (isToolEnabled("material-textures")) {
+    addSessionReportModule(modules, "material-textures", "材质贴图检查", materialTextureSummary, {
+      references: materialTextureReferences
+    });
+  }
+  if (isToolEnabled("duplicate-assets")) {
+    addSessionReportModule(modules, "duplicate-assets", "重复资源检查", duplicateAssetSummary, {
+      sameNameGroups: duplicateSameNameGroups,
+      duplicateHashGroups
+    });
+  }
+  if (isToolEnabled("scene-prefab-reference-health")) {
+    addSessionReportModule(modules, "scene-prefab-reference-health", "场景和 Prefab 引用健康", scenePrefabReferenceSummary, {
+      issues: scenePrefabReferenceIssues
+    });
+  }
   return {
     modules,
     currentPlan: sanitizeCurrentPlanForReport(currentPlan),
@@ -1079,7 +1333,8 @@ async function scanAssetReport(panel) {
     const result = await requestMain("scan-assets", {
       search: panel.$.assetScanSearchInput.value,
       extensions: panel.$.assetScanExtensionInput.value,
-      directory: panel.$.assetScanDirectoryInput.value
+      directory: panel.$.assetScanDirectoryInput.value,
+      issueIgnorePatterns: panel.$.assetScanIssueIgnoreInput.value
     });
     scanResourceEntries = result.entries || [];
     scanIssues = result.issues || [];
@@ -1132,7 +1387,8 @@ function renderAssetScanSummary(panel) {
   }
 
   const summary = scanReportSummary;
-  panel.$.assetScanSummary.textContent = `扫描 ${summary.scanDirectory || "assets"}：文件 ${safeNumber(summary.fileCount)} 项，目录 ${safeNumber(summary.directoryCount)} 项，总大小 ${formatSize(summary.totalSize || 0)}；缺失 meta ${safeNumber(summary.missingMetaCount)} 项，孤立 meta ${safeNumber(summary.orphanMetaCount)} 项，空目录 ${safeNumber(summary.emptyDirectoryCount)} 项；当前筛选显示异常 ${safeNumber(summary.visibleIssueCount)} 项，类型 ${safeNumber(summary.typeCount)} 类。`;
+  const ignoredText = summary.ignoredIssueCount ? `，已忽略异常 ${safeNumber(summary.ignoredIssueCount)} 项` : "";
+  panel.$.assetScanSummary.textContent = `扫描 ${summary.scanDirectory || "assets"}：文件 ${safeNumber(summary.fileCount)} 项，目录 ${safeNumber(summary.directoryCount)} 项，总大小 ${formatSize(summary.totalSize || 0)}；缺失 meta ${safeNumber(summary.missingMetaCount)} 项，孤立 meta ${safeNumber(summary.orphanMetaCount)} 项，空目录 ${safeNumber(summary.emptyDirectoryCount)} 项${ignoredText}；当前筛选显示异常 ${safeNumber(summary.visibleIssueCount)} 项，类型 ${safeNumber(summary.typeCount)} 类。`;
 }
 
 function renderAssetScanResources(panel) {
@@ -1140,12 +1396,14 @@ function renderAssetScanResources(panel) {
   panel.$.assetScanResourceEmpty.style.display = scanResourceEntries.length ? "none" : "block";
   for (const entry of scanResourceEntries) {
     const canCheckReference = entry.selectable && !entry.missingMeta;
+    const statusText = entry.issueIgnored ? "已忽略" : entry.missingMeta ? "缺少 meta" : "正常";
+    const statusClass = entry.issueIgnored ? "ready" : entry.missingMeta ? "warning" : "";
     const row = document.createElement("tr");
     row.innerHTML = `
       <td class="path" title="${escapeHtml(entry.path)}">${escapeHtml(entry.path)}</td>
       <td>${escapeHtml(entry.extension || "-")}</td>
       <td>${entry.kind === "directory" ? "-" : formatSize(entry.size || 0)}</td>
-      <td class="${entry.missingMeta ? "warning" : ""}">${entry.missingMeta ? "缺少 meta" : "正常"}</td>
+      <td class="${statusClass}">${statusText}</td>
       <td><button class="locate">定位</button><button class="check-reference" ${canCheckReference ? "" : "disabled"}>查引用</button></td>
     `;
     row.querySelector(".locate").addEventListener("click", () => locate(panel, entry.path));
@@ -1235,6 +1493,25 @@ async function checkReferenceForPath(panel, path) {
   if (!panel.$.referenceDirectoryInput.value) {
     panel.$.referenceDirectoryInput.value = panel.$.assetScanDirectoryInput.value || "assets";
   }
+  await checkReferences(panel);
+}
+
+async function checkReferenceForSelectedAsset(panel) {
+  setBusy(panel, true);
+  setStatus(panel, "正在读取当前选中资源...");
+  try {
+    const result = await requestMain("get-selected-asset-path");
+    panel.$.referenceTargetInput.value = result.path;
+    if (!panel.$.referenceDirectoryInput.value) {
+      panel.$.referenceDirectoryInput.value = panel.$.assetScanDirectoryInput.value || "assets";
+    }
+  } catch (error) {
+    setStatus(panel, `读取选中资源失败：${error.message}`);
+    return;
+  } finally {
+    setBusy(panel, false);
+  }
+
   await checkReferences(panel);
 }
 
@@ -2473,6 +2750,7 @@ function invalidatePlan(panel) {
 
 function setBusy(panel, busy) {
   panel.$.assetScanButton.disabled = busy;
+  panel.$.referenceSelectedAssetButton.disabled = busy;
   panel.$.referenceCheckButton.disabled = busy;
   panel.$.nodeReferenceCheckButton.disabled = busy;
   panel.$.unusedScanButton.disabled = busy;
@@ -2507,7 +2785,7 @@ function isCompleteAssetScanResult(result) {
     Array.isArray(result.entries) &&
     Array.isArray(result.issues) &&
     Array.isArray(result.typeStats) &&
-    ["fileCount", "directoryCount", "totalSize", "emptyDirectoryCount", "visibleIssueCount", "typeCount"].every((key) => Number.isFinite(Number(summary[key])))
+    ["fileCount", "directoryCount", "totalSize", "emptyDirectoryCount", "ignoredIssueCount", "visibleIssueCount", "typeCount"].every((key) => Number.isFinite(Number(summary[key])))
   );
 }
 
