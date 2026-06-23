@@ -17,6 +17,7 @@
 - 主进程消息出口增加兼容错误协议包装，错误返回 `{ ok: false, error }`，面板仍通过 `requestMain()` 转成异常展示。
 - 增加旧 `project-asset-mover` profile/log 兼容读取测试。
 - 增加报告导出 token 过滤测试，主进程会递归移除报告快照里的 `token` 字段。
+- 拆出 `panel/request.js` 和 `panel/format.js`，面板请求兼容转换与格式化工具已从大面板文件中分离。
 
 还没有完成：
 
@@ -31,12 +32,12 @@
 | 优化方向 | 当前状态 | 完成度 | 当前证据 | 后续目标 |
 | --- | --- | ---: | --- | --- |
 | 兼容 IPC 协议 | 已完成错误返回入口 | 80% | `main/protocol.js`、`toProtocol()`、`withProtocol()`、`requestMain()` | 继续细化不同错误码 |
-| 面板请求收敛 | 已完成第一版 | 70% | `panel/main.js` 中仅 `requestMain()` 直接调用 `Editor.Message.request(PACKAGE_NAME, ...)` | 拆出 `panel/request.js`，统一 loading、错误提示和日志 |
+| 面板请求收敛 | 已拆出请求模块 | 80% | `panel/request.js`、`requestMain()`、`createAssetStewardError()` | 继续统一 loading、错误提示和日志 |
 | 危险操作审计 | 已完成第一版 | 65% | 移动失败明细持久化、删除备份 hash、`execution-result.json` | 增加恢复辅助入口、备份校验入口、审计报告聚合 |
 | 自动化测试 | 已覆盖阶段 1 收尾项 | 35% | `npm.cmd test` 通过 6 个测试 | 覆盖扫描、引用图、resources 检查和更多历史迁移 |
 | 文档收敛 | 已完成起步 | 45% | `docs/architecture.md`、`docs/safety.md`、本文档 | 从 `FEATURES.md` 拆出 roadmap、用户手册、开发手册 |
 | 主进程模块拆分 | 未开始 | 0% | `main.js` 仍承载主要逻辑 | 拆成扫描、引用图、移动计划、删除审计、报告等模块 |
-| 面板模块拆分 | 未开始 | 0% | `panel/main.js` 仍承载模板、样式、状态和渲染 | 按 Tab 或模块拆分状态、渲染、事件绑定 |
+| 面板模块拆分 | 已完成基础工具拆分 | 15% | `panel/request.js`、`panel/format.js`；`panel/main.js` 仍承载模板、样式、状态和渲染 | 按 Tab 或模块拆分状态、渲染、事件绑定 |
 | UI 风险总览 | 未开始 | 0% | 各 Tab 结果仍分散展示 | 增加全局风险摘要、推荐下一步、最近执行状态 |
 | 可拖拽缩放工作区 | 未开始 | 0% | 当前仍是固定 Tab 布局 | 实现窗口拖拽、缩放、布局保存、重置和平铺 |
 | 性能与大项目体验 | 未开始 | 0% | 扫描仍是同步文件遍历为主 | 增量扫描、进度反馈、取消任务、缓存 UUID 图 |
@@ -59,7 +60,8 @@
 - 已完成：为主进程错误补 `compatibleError()` 包装，但保持旧面板仍能通过异常捕获显示错误。
 - 已完成：增加历史迁移测试，覆盖旧 `project-asset-mover` profile/log 的兼容读取。
 - 已完成：增加报告导出测试，确认执行 token 不会写入报告。
-- 待做：增加 `panel/request.js`，把 `requestMain()` 从大面板文件中拆出。
+- 已完成：增加 `panel/request.js`，把 `requestMain()` 从大面板文件中拆出。
+- 已完成：增加 `panel/format.js`，把面板格式化、HTML escape、尺寸、日期等工具函数从大面板文件中拆出。
 
 验收标准：
 
@@ -150,10 +152,9 @@
 
 ## 近期推荐顺序
 
-1. 拆 `panel/request.js` 和 `panel/format.js`，完成阶段 1 面板侧收尾。
-2. 拆 `main/path-utils.js`、`main/profile.js`、`main/move-plan.js`。
-3. 做小窗口工作区第一版，只迁移资源扫描、引用检查、日志。
-4. 做总览风险面板。
+1. 拆 `main/path-utils.js`、`main/profile.js`、`main/move-plan.js`。
+2. 做小窗口工作区第一版，只迁移资源扫描、引用检查、日志。
+3. 做总览风险面板。
 
 ## 暂不建议做的事
 
