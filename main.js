@@ -3,7 +3,7 @@
 const Fs = require("fs");
 const Path = require("path");
 const Crypto = require("crypto");
-const { compatibleSuccess } = require("./main/protocol");
+const { compatibleSuccess, compatibleError } = require("./main/protocol");
 const PACKAGE_VERSION = require("./package.json").version;
 
 const PACKAGE_NAME = "asset-steward";
@@ -242,111 +242,133 @@ exports.methods = {
   },
 
   scanAssets(options) {
-    return toProtocol(scanAssets(options));
+    return withProtocol(() => scanAssets(options));
   },
 
   checkReferences(payload) {
-    return toProtocol(checkReferences(payload));
+    return withProtocol(() => checkReferences(payload));
   },
 
   async selectReferenceNode(payload) {
-    return toProtocol(await selectReferenceNode(payload));
+    return withProtocol(() => selectReferenceNode(payload));
   },
 
   checkNodeReferences(payload) {
-    return toProtocol(checkNodeReferences(payload));
+    return withProtocol(() => checkNodeReferences(payload));
   },
 
   checkResourcesRuntime(payload) {
-    return toProtocol(checkResourcesRuntime(payload));
+    return withProtocol(() => checkResourcesRuntime(payload));
   },
 
   reportPackageSize(payload) {
-    return toProtocol(reportPackageSize(payload));
+    return withProtocol(() => reportPackageSize(payload));
   },
 
   checkDirectoryConvention(payload) {
-    return toProtocol(checkDirectoryConvention(payload));
+    return withProtocol(() => checkDirectoryConvention(payload));
   },
 
   checkDuplicateAssets(payload) {
-    return toProtocol(checkDuplicateAssets(payload));
+    return withProtocol(() => checkDuplicateAssets(payload));
   },
 
   checkMaterialTextures(payload) {
-    return toProtocol(checkMaterialTextures(payload));
+    return withProtocol(() => checkMaterialTextures(payload));
   },
 
   checkScenePrefabReferenceHealth(payload) {
-    return toProtocol(checkScenePrefabReferenceHealth(payload));
+    return withProtocol(() => checkScenePrefabReferenceHealth(payload));
   },
 
   scanUnusedAssets(payload) {
-    return toProtocol(scanUnusedAssets(payload));
+    return withProtocol(() => scanUnusedAssets(payload));
   },
 
   previewUnusedDelete(payload) {
-    lastUnusedDeletePlan = buildUnusedDeletePlan(payload);
-    return toProtocol(lastUnusedDeletePlan.publicResult);
+    return withProtocol(() => {
+      lastUnusedDeletePlan = buildUnusedDeletePlan(payload);
+      return lastUnusedDeletePlan.publicResult;
+    });
   },
 
   async executeUnusedDelete(payload) {
-    return toProtocol(await executeUnusedDelete(payload));
+    return withProtocol(() => executeUnusedDelete(payload));
   },
 
   getToolboxFramework() {
-    return toProtocol(getToolboxFramework());
+    return withProtocol(() => getToolboxFramework());
   },
 
   loadState() {
-    return toProtocol(loadState());
+    return withProtocol(() => loadState());
   },
 
   getHistoryDetail(payload) {
-    return toProtocol(getHistoryDetail(payload));
+    return withProtocol(() => getHistoryDetail(payload));
   },
 
   appendLog(payload) {
-    return toProtocol(appendLog(payload));
+    return withProtocol(() => appendLog(payload));
   },
 
   getLogs() {
-    return toProtocol(getLogs());
+    return withProtocol(() => getLogs());
   },
 
   clearLogs() {
-    return toProtocol(clearLogs());
+    return withProtocol(() => clearLogs());
   },
 
   exportSessionReport(payload) {
-    return toProtocol(exportSessionReport(payload));
+    return withProtocol(() => exportSessionReport(payload));
   },
 
   saveRules(payload) {
-    return toProtocol(saveRules(payload?.rules));
+    return withProtocol(() => saveRules(payload?.rules));
   },
 
   previewMoves(payload) {
-    lastPlan = buildMovePlan(payload);
-    return toProtocol(lastPlan.publicResult);
+    return withProtocol(() => {
+      lastPlan = buildMovePlan(payload);
+      return lastPlan.publicResult;
+    });
   },
 
   async executeMoves(payload) {
-    return toProtocol(await executeMoves(payload));
+    return withProtocol(() => executeMoves(payload));
   },
 
   previewReverse(payload) {
-    lastPlan = buildReversePlan(payload?.historyId, payload?.conflictPolicy);
-    return toProtocol(lastPlan.publicResult);
+    return withProtocol(() => {
+      lastPlan = buildReversePlan(payload?.historyId, payload?.conflictPolicy);
+      return lastPlan.publicResult;
+    });
   },
 
   locateAsset(payload) {
-    return toProtocol(locateAsset(payload));
+    return withProtocol(() => locateAsset(payload));
   },
 };
 
 function toProtocol(payload, warnings = []) {
   return compatibleSuccess(payload, warnings);
+}
+
+function toProtocolError(error, code = "ERR_ASSET_STEWARD") {
+  return compatibleError(error, code);
+}
+
+function withProtocol(action, errorCode = "ERR_ASSET_STEWARD") {
+  try {
+    const payload = action();
+    if (payload && typeof payload.then === "function") {
+      return payload.then((result) => toProtocol(result)).catch((error) => toProtocolError(error, errorCode));
+    }
+    return toProtocol(payload);
+  } catch (error) {
+    return toProtocolError(error, errorCode);
+  }
 }
 
 function getProjectPath() {
@@ -658,10 +680,7 @@ function clearLogs() {
 }
 
 function exportSessionReport(payload) {
-  const snapshot = cloneData(payload?.snapshot || {});
-  if (snapshot.currentPlan && typeof snapshot.currentPlan === "object") {
-    delete snapshot.currentPlan.token;
-  }
+  const snapshot = sanitizeReportSnapshot(payload?.snapshot || {});
   const generatedAt = new Date().toISOString();
   const report = {
     schemaVersion: 1,
@@ -685,6 +704,24 @@ function exportSessionReport(payload) {
     markdownPath: markdownRelativePath,
     moduleCount: Array.isArray(report.modules) ? report.modules.length : 0
   };
+}
+
+function sanitizeReportSnapshot(value) {
+  if (Array.isArray(value)) {
+    return value.map(sanitizeReportSnapshot);
+  }
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
+  const sanitized = {};
+  for (const [key, childValue] of Object.entries(value)) {
+    if (key.toLowerCase() === "token") {
+      continue;
+    }
+    sanitized[key] = sanitizeReportSnapshot(childValue);
+  }
+  return sanitized;
 }
 
 function formatReportTimestamp(isoTime) {

@@ -33,6 +33,14 @@ function writeFile(relativePath, content = "") {
   return fullPath;
 }
 
+function writeJson(relativePath, value) {
+  return writeFile(relativePath, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+function resetDirectory(relativePath) {
+  Fs.rmSync(Path.join(projectRoot, relativePath), { recursive: true, force: true });
+}
+
 function writeAsset(relativePath, content = "asset") {
   const fullPath = writeFile(relativePath, content);
   writeFile(`${relativePath}.meta`, JSON.stringify({
@@ -55,6 +63,53 @@ test("compatibleSuccess keeps legacy fields and adds protocol metadata", () => {
   assert.equal(result.ok, true);
   assert.equal(result.protocolVersion, 1);
   assert.deepEqual(result.warnings, ["check"]);
+});
+
+test("main methods return compatible protocol errors without throwing", () => {
+  const result = extension.methods.scanAssets({ directory: "../outside" });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.protocolVersion, 1);
+  assert.equal(result.error.code, "ERR_ASSET_STEWARD");
+  assert.match(result.error.message, /assets/);
+});
+
+test("loadState and getLogs read legacy project-asset-mover files", () => {
+  resetDirectory("profiles");
+  writeJson("profiles/project-asset-mover.json", {
+    version: 1,
+    rules: [{
+      id: "audio",
+      enabled: false,
+      extensions: ["mp3"],
+      nameKeywords: ["bgm"],
+      target: "assets/legacy/audio"
+    }],
+    history: [{
+      id: "legacy-history",
+      createdAt: "2026-06-23T00:00:00.000Z",
+      moves: []
+    }]
+  });
+  writeJson("profiles/project-asset-mover.logs.json", {
+    logs: [{
+      time: "2026-06-23T00:00:00.000Z",
+      level: "info",
+      message: "legacy log"
+    }]
+  });
+
+  const state = extension.methods.loadState();
+  const logs = extension.methods.getLogs();
+
+  assert.equal(state.ok, true);
+  assert.equal(state.profilePath, "profiles/asset-steward.json");
+  assert.equal(state.history[0].id, "legacy-history");
+  assert.equal(state.rules.find((rule) => rule.id === "audio").target, "assets/legacy/audio");
+  assert.ok(Fs.existsSync(Path.join(projectRoot, "profiles/asset-steward.json")));
+  assert.equal(logs.ok, true);
+  assert.equal(logs.logPath, "profiles/asset-steward.logs.json");
+  assert.equal(logs.logs[0].message, "legacy log");
 });
 
 test("manual move plan remains compatible with existing preview fields", () => {
@@ -107,4 +162,43 @@ test("unused delete backup manifest records hashes and execution audit", () => {
   assert.equal(audit.deleted.length, 1);
   assert.equal(audit.failed.length, 0);
   assert.equal(audit.manifestPath, backup.manifestPath);
+});
+
+test("session report export removes execution tokens from json and markdown", () => {
+  resetDirectory("reports");
+
+  const result = core.exportSessionReport({
+    snapshot: {
+      modules: [{
+        id: "sample",
+        title: "Sample",
+        summary: { total: 1 },
+        data: {
+          nested: {
+            token: "module-secret-token",
+            value: 1
+          }
+        }
+      }],
+      currentPlan: {
+        token: "plan-secret-token",
+        summary: { ready: 1 },
+        items: [{
+          path: "assets/res/fish.png",
+          token: "item-secret-token"
+        }]
+      },
+      logs: []
+    }
+  });
+
+  const jsonText = Fs.readFileSync(Path.join(projectRoot, result.jsonPath), "utf8");
+  const markdownText = Fs.readFileSync(Path.join(projectRoot, result.markdownPath), "utf8");
+  const report = JSON.parse(jsonText);
+
+  assert.equal(report.currentPlan.token, undefined);
+  assert.equal(report.currentPlan.items[0].token, undefined);
+  assert.equal(report.modules[0].data.nested.token, undefined);
+  assert.doesNotMatch(jsonText, /secret-token/);
+  assert.doesNotMatch(markdownText, /secret-token/);
 });
