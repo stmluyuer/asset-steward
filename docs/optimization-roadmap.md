@@ -21,13 +21,15 @@
 - 拆出 `main/path-utils.js`、`main/profile.js` 和 `main/move-plan.js`，路径工具、profile/log 读写、移动预览和执行已从 `main.js` 中分离。
 - 拆出 `main/asset-scan.js`、`main/reference-graph.js` 和 `main/runtime-resources.js`，资源扫描、UUID 引用图和 resources 动态加载静态检查已模块化。
 - 拆出 `main/unused-delete.js` 和 `main/report.js`，未引用删除预览/备份/审计与会话报告导出已模块化。
+- 拆出 `main/health-checks.js`，包体统计、目录规范、重复资源、材质贴图和场景/Prefab 引用健康检查已模块化。
+- 新增面板内 Resizable 分栏第一版，资源扫描、引用检查、自动分类、节点引用、resources 检查和重复资源检查的左右区域可拖拽调整宽度。
 
 还没有完成：
 
-- 面板大文件拆分，以及主进程剩余健康检查逻辑拆分。
+- 面板大文件拆分。
 - 所有模块的系统性测试覆盖。
 - 完整统一的新协议错误返回。
-- 可拖拽缩放的小窗口工作区。
+- 面板内 Resizable 分栏仍需继续覆盖更多区域和完善布局预设。
 - UI 总览面板、风险聚合和布局预设。
 
 ## 优化状态总览
@@ -37,12 +39,12 @@
 | 兼容 IPC 协议 | 已完成错误返回入口 | 80% | `main/protocol.js`、`toProtocol()`、`withProtocol()`、`requestMain()` | 继续细化不同错误码 |
 | 面板请求收敛 | 已拆出请求模块 | 80% | `panel/request.js`、`requestMain()`、`createAssetStewardError()` | 继续统一 loading、错误提示和日志 |
 | 危险操作审计 | 已完成第一版 | 65% | 移动失败明细持久化、删除备份 hash、`execution-result.json` | 增加恢复辅助入口、备份校验入口、审计报告聚合 |
-| 自动化测试 | 已覆盖阶段 1 收尾项和主进程模块拆分关键路径 | 50% | `npm.cmd test` 通过 13 个测试 | 覆盖更多扫描、引用图、resources 检查和历史迁移边界 |
+| 自动化测试 | 已覆盖阶段 1 收尾项和主进程模块拆分关键路径 | 50% | `npm.cmd test` 通过 15 个测试 | 覆盖更多扫描、引用图、resources 检查和历史迁移边界 |
 | 文档收敛 | 已完成起步 | 45% | `docs/architecture.md`、`docs/safety.md`、本文档 | 从 `FEATURES.md` 拆出 roadmap、用户手册、开发手册 |
-| 主进程模块拆分 | 已完成核心扫描、移动、删除审计与报告拆分 | 70% | `main/path-utils.js`、`main/profile.js`、`main/move-plan.js`、`main/asset-scan.js`、`main/reference-graph.js`、`main/runtime-resources.js`、`main/unused-delete.js`、`main/report.js`；`main.js` 仍承载部分健康检查逻辑 | 继续拆健康检查模块 |
+| 主进程模块拆分 | 已完成核心扫描、移动、删除审计、报告与健康检查拆分 | 85% | `main/path-utils.js`、`main/profile.js`、`main/move-plan.js`、`main/asset-scan.js`、`main/reference-graph.js`、`main/runtime-resources.js`、`main/unused-delete.js`、`main/report.js`、`main/health-checks.js` | 后续按需要继续拆工具箱元信息或入口胶水 |
 | 面板模块拆分 | 已完成基础工具拆分 | 15% | `panel/request.js`、`panel/format.js`；`panel/main.js` 仍承载模板、样式、状态和渲染 | 按 Tab 或模块拆分状态、渲染、事件绑定 |
 | UI 风险总览 | 未开始 | 0% | 各 Tab 结果仍分散展示 | 增加全局风险摘要、推荐下一步、最近执行状态 |
-| 可拖拽缩放工作区 | 未开始 | 0% | 当前仍是固定 Tab 布局 | 实现窗口拖拽、缩放、布局保存、重置和平铺 |
+| 面板内 Resizable 分栏 | 已完成第一版 | 25% | `panel/main.js`：多个双栏区域插入拖拽分隔条，并用本地布局保存左侧宽度 | 继续覆盖三栏区域、垂直分隔和布局预设 |
 | 性能与大项目体验 | 未开始 | 0% | 扫描仍是同步文件遍历为主 | 增量扫描、进度反馈、取消任务、缓存 UUID 图 |
 
 ## 建议阶段
@@ -87,7 +89,7 @@
 - 已完成：`main/move-plan.js`：移动预览、冲突策略、反向计划、执行。
 - 已完成：`main/unused-delete.js`：未引用删除预览、备份、manifest、执行审计。
 - 已完成：`main/report.js`：Markdown/JSON 报告。
-- 待评估：`main/health-checks.js` 或按检查类型继续拆分包体、目录规范、重复资源、材质贴图和场景/Prefab 引用健康检查。
+- 已完成：`main/health-checks.js`：包体统计、目录规范、重复资源、材质贴图和场景/Prefab 引用健康检查。
 
 验收标准：
 
@@ -98,7 +100,7 @@
 
 ### 阶段 3：面板模块拆分
 
-目标：让 UI 可以安全演进到可拖拽缩放工作区。
+目标：让 UI 可以安全演进为面板内可拖拽调整大小的分栏布局。
 
 建议拆分：
 
@@ -117,7 +119,7 @@
 - 所有按钮事件仍只绑定一次。
 - 面板重载后默认扫描、历史、日志仍能正常加载。
 
-### 阶段 4：可拖拽缩放工作区
+### 阶段 4：面板内 Resizable 分栏
 
 目标：把固定 Tab 逐步升级为可布局的工作台，而不是继续堆长页面。
 
@@ -156,9 +158,9 @@
 
 ## 近期推荐顺序
 
-1. 评估并继续拆主进程健康检查逻辑，优先选择包体统计、目录规范、重复资源或材质贴图中边界最清楚的一块。
-2. 做小窗口工作区第一版，只迁移资源扫描、引用检查、日志。
-3. 做总览风险面板。
+1. 继续完善面板内 Resizable 分栏：优先覆盖包体统计三栏区域、纵向分隔和布局重置入口。
+2. 做总览风险面板。
+3. 继续补健康检查模块的边界测试，优先覆盖包体统计、目录规范和场景/Prefab 引用健康。
 
 ## 暂不建议做的事
 

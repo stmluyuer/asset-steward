@@ -26,6 +26,7 @@
 - `main/reference-graph.js`：UUID 提取、序列化引用、主场景可达图。
 - `main/move-plan.js`：移动预览、冲突策略、反向计划、执行历史。
 - `main/unused-delete.js`：未引用删除预览、备份、manifest、执行审计。
+- `main/health-checks.js`：包体统计、目录规范、重复资源、材质贴图、场景/Prefab 引用健康检查。
 - `main/report.js`：Markdown/JSON 会话报告。
 - `panel/request.js`：面板消息请求、协议兼容、错误转换。
 - `panel/tabs/*`：各 Tab 的状态、渲染和事件绑定。
