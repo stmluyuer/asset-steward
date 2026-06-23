@@ -1,0 +1,170 @@
+{
+  "package_version": 2,
+  "version": "1.13.0",
+  "name": "project-asset-mover",
+  "description": "项目资源扫描、分类、移动和报告工具箱",
+  "main": "./main.js",
+  "editor": ">=3.8.0",
+  "author": "project",
+  "contributions": {
+    "menu": [
+      {
+        "path": "项目资源工具箱",
+        "label": "打开工具箱",
+        "message": "open-panel"
+      }
+    ],
+    "shortcuts": [
+        {
+          "message": "open-panel",
+          "win": "ctrl+shift+g",
+          "mac": "cmd+shift+g"
+        }
+    ],
+    "messages": {
+      "open-panel": {
+        "methods": [
+          "openPanel"
+        ]
+      },
+      "scan-assets": {
+        "methods": [
+          "scanAssets"
+        ]
+      },
+      "check-references": {
+        "methods": [
+          "checkReferences"
+        ]
+      },
+      "select-reference-node": {
+        "methods": [
+          "selectReferenceNode"
+        ]
+      },
+      "check-node-references": {
+        "methods": [
+          "checkNodeReferences"
+        ]
+      },
+      "check-resources-runtime": {
+        "methods": [
+          "checkResourcesRuntime"
+        ]
+      },
+      "report-package-size": {
+        "methods": [
+          "reportPackageSize"
+        ]
+      },
+      "check-directory-convention": {
+        "methods": [
+          "checkDirectoryConvention"
+        ]
+      },
+      "check-duplicate-assets": {
+        "methods": [
+          "checkDuplicateAssets"
+        ]
+      },
+      "check-material-textures": {
+        "methods": [
+          "checkMaterialTextures"
+        ]
+      },
+      "check-scene-prefab-reference-health": {
+        "methods": [
+          "checkScenePrefabReferenceHealth"
+        ]
+      },
+      "scan-unused-assets": {
+        "methods": [
+          "scanUnusedAssets"
+        ]
+      },
+      "preview-unused-delete": {
+        "methods": [
+          "previewUnusedDelete"
+        ]
+      },
+      "execute-unused-delete": {
+        "methods": [
+          "executeUnusedDelete"
+        ]
+      },
+      "get-toolbox-framework": {
+        "methods": [
+          "getToolboxFramework"
+        ]
+      },
+      "load-state": {
+        "methods": [
+          "loadState"
+        ]
+      },
+      "get-history-detail": {
+        "methods": [
+          "getHistoryDetail"
+        ]
+      },
+      "append-log": {
+        "methods": [
+          "appendLog"
+        ]
+      },
+      "get-logs": {
+        "methods": [
+          "getLogs"
+        ]
+      },
+      "clear-logs": {
+        "methods": [
+          "clearLogs"
+        ]
+      },
+      "export-session-report": {
+        "methods": [
+          "exportSessionReport"
+        ]
+      },
+      "save-rules": {
+        "methods": [
+          "saveRules"
+        ]
+      },
+      "preview-moves": {
+        "methods": [
+          "previewMoves"
+        ]
+      },
+      "execute-moves": {
+        "methods": [
+          "executeMoves"
+        ]
+      },
+      "preview-reverse": {
+        "methods": [
+          "previewReverse"
+        ]
+      },
+      "locate-asset": {
+        "methods": [
+          "locateAsset"
+        ]
+      }
+    }
+  },
+  "panels": {
+    "main": {
+      "title": "项目资源工具箱",
+      "main": "./panel/main.js",
+      "type": "dockable",
+      "size": {
+        "width": 1180,
+        "height": 760,
+        "min-width": 900,
+        "min-height": 600
+      }
+    }
+  }
+}
