@@ -4,20 +4,41 @@ const Fs = require("fs");
 const Path = require("path");
 const Crypto = require("crypto");
 const { compatibleSuccess, compatibleError } = require("./main/protocol");
+const {
+  getProjectPath,
+  normalizeRelativePath,
+  toProjectPath,
+  toDbUrl,
+  isInsideAssets,
+  isStrictlyInside,
+  comparePath,
+  walk,
+  toRelativePath,
+  statPath,
+  pathExists,
+  destinationOccupied,
+  hasMeta,
+  writeJson,
+} = require("./main/path-utils");
+const {
+  loadProfile,
+  migrateProfile,
+  loadState,
+  getHistoryDetail,
+  getLogs,
+  appendLog,
+  clearLogs,
+  sanitizeRules,
+  normalizeExtensions,
+  normalizeKeywords,
+  saveRules,
+} = require("./main/profile");
+const MovePlan = require("./main/move-plan");
 const PACKAGE_VERSION = require("./package.json").version;
 
 const PACKAGE_NAME = "asset-steward";
-const PROFILE_RELATIVE = "profiles/asset-steward.json";
-const LOG_RELATIVE = "profiles/asset-steward.logs.json";
 const REPORT_DIRECTORY_RELATIVE = "reports/asset-steward";
 const BACKUP_DIRECTORY_RELATIVE = "backups/asset-steward";
-const LEGACY_PROFILE_RELATIVE = "profiles/project-asset-mover.json";
-const LEGACY_LOG_RELATIVE = "profiles/project-asset-mover.logs.json";
-const PROFILE_VERSION = 2;
-const MAX_HISTORY = 30;
-const MAX_LOGS = 200;
-const VALID_CONFLICT_POLICIES = new Set(["skip", "rename", "overwrite"]);
-const IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".webp"];
 const DEFAULT_REFERENCE_EXTENSIONS = [".scene", ".prefab", ".mtl", ".material", ".anim", ".effect"];
 const DEFAULT_NODE_REFERENCE_EXTENSIONS = [".scene", ".prefab"];
 const DEFAULT_CODE_SCAN_DIRECTORIES = ["assets/script", "assets/scripts"];
@@ -341,7 +362,7 @@ exports.methods = {
 
   previewReverse(payload) {
     return withProtocol(() => {
-      lastPlan = buildReversePlan(payload?.historyId, payload?.conflictPolicy);
+      lastPlan = MovePlan.buildReversePlan(payload?.historyId, payload?.conflictPolicy);
       return lastPlan.publicResult;
     });
   },
@@ -371,69 +392,6 @@ function withProtocol(action, errorCode = "ERR_ASSET_STEWARD") {
   }
 }
 
-function getProjectPath() {
-  return global.Editor?.Project?.path || Path.resolve(__dirname, "../..");
-}
-
-function normalizeRelativePath(value) {
-  return String(value || "").replace(/\\/g, "/").replace(/^\/+/, "").replace(/\/+$/, "");
-}
-
-function toProjectPath(relativePath) {
-  return Path.join(getProjectPath(), normalizeRelativePath(relativePath));
-}
-
-function toDbUrl(relativePath) {
-  return `db://${normalizeRelativePath(relativePath)}`;
-}
-
-function isInsideAssets(relativePath) {
-  const normalized = normalizeRelativePath(relativePath);
-  return normalized === "assets" || normalized.startsWith("assets/");
-}
-
-function isStrictlyInside(parentPath, childPath) {
-  return normalizeRelativePath(childPath).startsWith(`${normalizeRelativePath(parentPath)}/`);
-}
-
-function comparePath(left, right) {
-  return String(left).localeCompare(String(right), "zh-CN");
-}
-
-function walk(root, visitor) {
-  if (!Fs.existsSync(root)) {
-    return;
-  }
-
-  for (const entry of Fs.readdirSync(root, { withFileTypes: true })) {
-    const fullPath = Path.join(root, entry.name);
-    visitor(fullPath, entry);
-    if (entry.isDirectory()) {
-      walk(fullPath, visitor);
-    }
-  }
-}
-
-function toRelativePath(fullPath) {
-  return normalizeRelativePath(Path.relative(getProjectPath(), fullPath));
-}
-
-function statPath(relativePath) {
-  return Fs.statSync(toProjectPath(relativePath), { throwIfNoEntry: false }) || null;
-}
-
-function pathExists(relativePath) {
-  return !!statPath(relativePath);
-}
-
-function destinationOccupied(relativePath) {
-  return pathExists(relativePath) || pathExists(`${relativePath}.meta`);
-}
-
-function hasMeta(relativePath) {
-  return pathExists(`${relativePath}.meta`);
-}
-
 function normalizeScanDirectory(value) {
   const directory = normalizeRelativePath(value || "assets") || "assets";
   if (!isInsideAssets(directory)) {
@@ -448,169 +406,6 @@ function normalizeScanDirectory(value) {
 function normalizeReferenceExtensions(value) {
   const extensions = normalizeExtensions(value);
   return extensions.length > 0 ? extensions : DEFAULT_REFERENCE_EXTENSIONS;
-}
-
-function readJson(filePath, fallback) {
-  try {
-    return JSON.parse(Fs.readFileSync(filePath, "utf8").replace(/^\uFEFF/, ""));
-  } catch (error) {
-    return fallback;
-  }
-}
-
-function readJsonWithLegacy(primaryPath, legacyPath, fallback) {
-  if (Fs.existsSync(primaryPath)) {
-    return readJson(primaryPath, fallback);
-  }
-  if (legacyPath && Fs.existsSync(legacyPath)) {
-    return readJson(legacyPath, fallback);
-  }
-  return fallback;
-}
-
-function writeJson(filePath, value) {
-  Fs.mkdirSync(Path.dirname(filePath), { recursive: true });
-  Fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
-}
-
-function getProfilePath() {
-  return toProjectPath(PROFILE_RELATIVE);
-}
-
-function getLogPath() {
-  return toProjectPath(LOG_RELATIVE);
-}
-
-function getLegacyProfilePath() {
-  return toProjectPath(LEGACY_PROFILE_RELATIVE);
-}
-
-function getLegacyLogPath() {
-  return toProjectPath(LEGACY_LOG_RELATIVE);
-}
-
-function defaultProfile() {
-  return {
-    version: PROFILE_VERSION,
-    rules: defaultRules(),
-    history: []
-  };
-}
-
-function defaultRules() {
-  return [
-    { id: "prefab", enabled: true, extensions: [".prefab"], nameKeywords: [], target: "assets/res/prefab" },
-    { id: "audio", enabled: true, extensions: [".mp3", ".wav", ".ogg"], nameKeywords: [], target: "assets/res/audio" },
-    { id: "model", enabled: true, extensions: [".fbx", ".gltf", ".glb"], nameKeywords: [], target: "assets/res/model" },
-    { id: "image-ui", enabled: true, extensions: IMAGE_EXTENSIONS, nameKeywords: ["ui", "icon", "button", "btn", "joystick", "progress", "topic", "guide", "hud", "arrow", "coin", "gold", "sell", "按钮", "金币"], target: "assets/res/image/ui" },
-    { id: "image-vfx", enabled: true, extensions: IMAGE_EXTENSIONS, nameKeywords: ["effect", "vfx", "fx", "glow", "particle", "ripple", "noise", "mask", "line", "lizi", "circle", "spark", "splash", "光", "圈", "特效"], target: "assets/res/image/vfx" },
-    { id: "image-environment", enabled: true, extensions: IMAGE_EXTENSIONS, nameKeywords: ["water", "floor", "ground", "sky", "sea", "terrain", "track", "海", "地面", "天空"], target: "assets/res/image/environment" },
-    { id: "image-model", enabled: true, extensions: IMAGE_EXTENSIONS, nameKeywords: ["_d", "_n", "_a", "_c", "albedo", "normal", "rough", "metal", "occlusion", "_ao"], target: "assets/res/image/model" },
-    { id: "image-other", enabled: true, extensions: IMAGE_EXTENSIONS, nameKeywords: [], target: "assets/res/image/other" },
-    { id: "effect-chunk", enabled: true, extensions: [".effect", ".chunk"], nameKeywords: [], target: "assets/res/effects" },
-    { id: "material", enabled: true, extensions: [".mtl"], nameKeywords: [], target: "assets/res/material" }
-  ];
-}
-
-function loadProfile() {
-  const profilePath = getProfilePath();
-  const rawProfile = readJsonWithLegacy(profilePath, getLegacyProfilePath(), defaultProfile());
-  const profile = migrateProfile(rawProfile);
-  if (Number(rawProfile?.version) < PROFILE_VERSION || !Fs.existsSync(profilePath)) {
-    saveProfile(profile);
-  }
-  return {
-    version: PROFILE_VERSION,
-    rules: sanitizeRules(profile.rules),
-    history: Array.isArray(profile.history) ? profile.history.slice(0, MAX_HISTORY) : []
-  };
-}
-
-function saveProfile(profile) {
-  writeJson(getProfilePath(), {
-    version: PROFILE_VERSION,
-    rules: sanitizeRules(profile.rules),
-    history: Array.isArray(profile.history) ? profile.history.slice(0, MAX_HISTORY) : []
-  });
-}
-
-function migrateProfile(profile) {
-  if (Number(profile?.version) >= PROFILE_VERSION) {
-    return profile;
-  }
-
-  const oldRules = sanitizeRules(profile?.rules);
-  const defaults = defaultRules();
-  const defaultIds = new Set(defaults.map((rule) => rule.id));
-  const preservedIds = new Set(["prefab", "audio", "model"]);
-  const oldById = new Map(oldRules.map((rule) => [rule.id, rule]));
-  const migratedDefaults = defaults.map((rule) => preservedIds.has(rule.id) && oldById.has(rule.id) ? oldById.get(rule.id) : rule);
-  const customRules = oldRules.filter((rule) => rule.id !== "image" && !defaultIds.has(rule.id));
-  return {
-    version: PROFILE_VERSION,
-    rules: [...migratedDefaults, ...customRules],
-    history: Array.isArray(profile?.history) ? profile.history : []
-  };
-}
-
-function loadState() {
-  const profile = loadProfile();
-  return {
-    rules: profile.rules,
-    history: profile.history,
-    profilePath: PROFILE_RELATIVE
-  };
-}
-
-function getHistoryDetail(payload) {
-  const historyId = String(payload?.historyId || "").trim();
-  if (!historyId) {
-    throw new Error("缺少移动历史 ID。");
-  }
-  const entry = loadProfile().history.find((item) => item.id === historyId);
-  if (!entry) {
-    throw new Error("未找到指定移动历史，可能已超过最近 30 条保留范围。");
-  }
-  const moves = Array.isArray(entry.moves) ? entry.moves.map((move) => ({
-    source: normalizeRelativePath(move.source),
-    destination: normalizeRelativePath(move.destination),
-    action: String(move.action || ""),
-    overwrittenTargetRecoverable: move.overwrittenTargetRecoverable !== false
-  })) : [];
-  const deletedDirectories = Array.isArray(entry.deletedDirectories)
-    ? entry.deletedDirectories.map(normalizeRelativePath)
-    : [];
-  const failedMoves = Array.isArray(entry.failedMoves) ? entry.failedMoves.map((move) => ({
-    source: normalizeRelativePath(move.source),
-    destination: normalizeRelativePath(move.destination),
-    message: String(move.message || "")
-  })) : [];
-  const failedDirectories = Array.isArray(entry.failedDirectories) ? entry.failedDirectories.map((item) => ({
-    path: normalizeRelativePath(item.path),
-    message: String(item.message || "")
-  })) : [];
-  return {
-    detail: {
-      id: entry.id,
-      createdAt: entry.createdAt,
-      kind: entry.kind,
-      mode: entry.mode,
-      conflictPolicy: entry.conflictPolicy,
-      movedCount: Number(entry.movedCount) || moves.length,
-      failedCount: Number(entry.failedCount) || 0,
-      hasOverwrite: entry.hasOverwrite === true,
-      deletedDirectories,
-      cleanupFailedCount: Number(entry.cleanupFailedCount) || 0,
-      failedMoves,
-      failedDirectories,
-      moves,
-      failedMovesPersisted: Array.isArray(entry.failedMoves),
-      failedDirectoriesPersisted: Array.isArray(entry.failedDirectories),
-      warning: Array.isArray(entry.failedMoves) || Array.isArray(entry.failedDirectories)
-        ? "历史记录已包含本次执行的失败明细；反向计划仍需重新预览并人工复核。"
-        : "历史记录只持久化成功移动项、覆盖风险和空目录清理摘要；执行失败项和清理失败明细需查看当次执行日志。反向计划仍需重新预览并人工复核。"
-    }
-  };
 }
 
 function getToolboxFramework() {
@@ -635,48 +430,6 @@ function getToolboxFramework() {
 
 function cloneData(value) {
   return JSON.parse(JSON.stringify(value));
-}
-
-function getLogs() {
-  const data = readJsonWithLegacy(getLogPath(), getLegacyLogPath(), { logs: [] });
-  return {
-    logs: Array.isArray(data.logs) ? data.logs.slice(-MAX_LOGS) : [],
-    logPath: LOG_RELATIVE
-  };
-}
-
-function appendLog(payload) {
-  const level = ["info", "warning", "error"].includes(payload?.level) ? payload.level : "info";
-  const message = String(payload?.message || "").trim();
-  if (!message) {
-    return getLogs();
-  }
-
-  const data = getLogs();
-  data.logs.push({
-    time: new Date().toISOString(),
-    level,
-    message,
-    detail: payload?.detail ? String(payload.detail) : ""
-  });
-  data.logs = data.logs.slice(-MAX_LOGS);
-  writeJson(getLogPath(), { logs: data.logs });
-
-  const output = `[${PACKAGE_NAME}] ${message}`;
-  if (level === "error") {
-    console.error(output);
-  } else if (level === "warning") {
-    console.warn(output);
-  } else {
-    console.log(output);
-  }
-
-  return data;
-}
-
-function clearLogs() {
-  writeJson(getLogPath(), { logs: [] });
-  return { logs: [], logPath: LOG_RELATIVE };
 }
 
 function exportSessionReport(payload) {
@@ -810,42 +563,6 @@ function escapeMarkdownCell(value) {
 
 function escapeMarkdownInline(value) {
   return String(value ?? "-").replace(/`/g, "\\`");
-}
-
-function sanitizeRules(rules) {
-  if (!Array.isArray(rules)) {
-    return [];
-  }
-
-  return rules.map((rule, index) => ({
-    id: String(rule?.id || `rule-${index + 1}`),
-    enabled: rule?.enabled !== false,
-    extensions: normalizeExtensions(rule?.extensions),
-    nameKeywords: normalizeKeywords(rule?.nameKeywords),
-    target: normalizeRelativePath(rule?.target)
-  }));
-}
-
-function normalizeExtensions(value) {
-  const values = Array.isArray(value) ? value : String(value || "").split(",");
-  return [...new Set(values
-    .map((item) => String(item || "").trim().toLowerCase())
-    .filter(Boolean)
-    .map((item) => item.startsWith(".") ? item : `.${item}`))];
-}
-
-function normalizeKeywords(value) {
-  const values = Array.isArray(value) ? value : String(value || "").split(",");
-  return [...new Set(values
-    .map((item) => String(item || "").trim().toLowerCase())
-    .filter(Boolean))];
-}
-
-function saveRules(rules) {
-  const profile = loadProfile();
-  profile.rules = sanitizeRules(rules);
-  saveProfile(profile);
-  return { rules: profile.rules, profilePath: PROFILE_RELATIVE };
 }
 
 function scanAssets(options) {
@@ -2077,7 +1794,7 @@ function checkDirectoryConvention(payload) {
       continue;
     }
     fileCount++;
-    const rule = cleanRules.find((item) => ruleMatchesSource(item, entry.path, Path.extname(entry.path).toLowerCase()));
+    const rule = cleanRules.find((item) => MovePlan.ruleMatchesSource(item, entry.path, Path.extname(entry.path).toLowerCase()));
     if (!rule) {
       unmatchedCount++;
       continue;
@@ -2714,465 +2431,18 @@ function collectUnusedDeleteBackupFiles(plan) {
     .sort(comparePath);
 }
 
+async function executeMoves(payload) {
+  const result = await MovePlan.executeMovePlan(payload, lastPlan);
+  lastPlan = null;
+  return result;
+}
+
 function buildMovePlan(payload) {
-  const mode = payload?.mode === "rules" ? "rules" : "manual";
-  const conflictPolicy = validateConflictPolicy(payload?.conflictPolicy);
-  const selectedPaths = canonicalizeSelectedPaths(payload?.paths);
-  const ruleResult = mode === "rules"
-    ? buildRuleCandidates(selectedPaths, payload?.rules, payload?.ruleScope)
-    : null;
-  const candidates = ruleResult?.candidates || buildManualCandidates(selectedPaths, payload?.targetDirectory);
-
-  return finalizePlan({
-    mode,
-    kind: "move",
-    conflictPolicy,
-    candidates,
-    rules: mode === "rules" ? sanitizeRules(payload?.rules) : [],
-    directoriesToCreate: ruleResult?.directoriesToCreate || []
-  });
-}
-
-function validateConflictPolicy(value) {
-  const policy = String(value || "skip");
-  if (!VALID_CONFLICT_POLICIES.has(policy)) {
-    throw new Error(`不支持的冲突策略：${policy}`);
-  }
-  return policy;
-}
-
-function canonicalizeSelectedPaths(paths) {
-  const normalized = [...new Set((Array.isArray(paths) ? paths : [])
-    .map(normalizeRelativePath)
-    .filter((item) => item && item !== "assets"))]
-    .sort((left, right) => left.length - right.length || comparePath(left, right));
-
-  for (const path of normalized) {
-    if (!isInsideAssets(path)) {
-      throw new Error(`资源路径必须位于 assets 下：${path}`);
-    }
-  }
-
-  return normalized.filter((path, index) => !normalized.slice(0, index).some((parent) => isStrictlyInside(parent, path)));
-}
-
-function buildManualCandidates(paths, targetDirectory) {
-  const target = normalizeRelativePath(targetDirectory);
-  validateTargetDirectory(target);
-  return paths.map((source) => ({
-    source,
-    destination: normalizeRelativePath(`${target}/${Path.basename(source)}`),
-    ruleId: ""
-  }));
-}
-
-function buildRuleCandidates(selectedPaths, rules, ruleScope) {
-  const cleanRules = sanitizeRules(rules).filter((rule) => rule.enabled);
-  for (const rule of cleanRules) {
-    validateRuleTarget(rule.target);
-  }
-
-  const sourcePaths = ruleScope === "selected"
-    ? expandSelectedFiles(selectedPaths)
-    : scanAssets({}).entries.filter((entry) => entry.kind === "file").map((entry) => entry.path);
-
-  const candidates = [];
-  for (const source of sourcePaths) {
-    const sourceStat = statPath(source);
-    if (!sourceStat?.isFile()) {
-      continue;
-    }
-
-    const extension = Path.extname(source).toLowerCase();
-    const rule = cleanRules.find((item) => ruleMatchesSource(item, source, extension));
-    if (!rule) {
-      continue;
-    }
-
-    candidates.push({
-      source,
-      destination: normalizeRelativePath(`${rule.target}/${Path.basename(source)}`),
-      ruleId: rule.id
-    });
-  }
-  return {
-    candidates,
-    directoriesToCreate: [...new Set(candidates
-      .map((candidate) => Path.posix.dirname(candidate.destination))
-      .filter((target) => !pathExists(target)))]
-  };
-}
-
-function ruleMatchesSource(rule, source, extension = Path.extname(source).toLowerCase()) {
-  if (!rule.extensions.includes(extension)) {
-    return false;
-  }
-  if (rule.nameKeywords.length === 0) {
-    return true;
-  }
-
-  const fileName = Path.basename(source, extension).toLowerCase();
-  return rule.nameKeywords.some((keyword) => fileName.includes(keyword));
+  return MovePlan.buildMovePlan(payload, { scanAssets });
 }
 
 function expandSelectedFiles(selectedPaths) {
-  const result = new Set();
-  const allFiles = scanAssets({}).entries.filter((entry) => entry.kind === "file");
-  for (const selected of selectedPaths) {
-    const selectedStat = statPath(selected);
-    if (selectedStat?.isFile()) {
-      result.add(selected);
-      continue;
-    }
-    if (selectedStat?.isDirectory()) {
-      for (const entry of allFiles) {
-        if (isStrictlyInside(selected, entry.path)) {
-          result.add(entry.path);
-        }
-      }
-    }
-  }
-  return [...result].sort(comparePath);
-}
-
-function validateTargetDirectory(target) {
-  if (!isInsideAssets(target) || !statPath(target)?.isDirectory()) {
-    throw new Error(`目标目录必须是 assets 下已存在的目录：${target || "(空)"}`);
-  }
-}
-
-function validateRuleTarget(target) {
-  if (!isInsideAssets(target) || target === "assets") {
-    throw new Error(`自动分类目标必须是 assets 下的子目录：${target || "(空)"}`);
-  }
-  if (pathExists(target) && !statPath(target)?.isDirectory()) {
-    throw new Error(`自动分类目标已存在但不是目录：${target}`);
-  }
-}
-
-function finalizePlan({ mode, kind, conflictPolicy, candidates, rules, historyId = "", directoriesToCreate = [] }) {
-  const sourceSet = new Set(candidates.map((item) => item.source));
-  const reservedDestinations = new Set();
-  const items = [];
-  const creatableDirectories = new Set(directoriesToCreate.map(normalizeRelativePath));
-
-  for (const candidate of candidates) {
-    items.push(resolvePlanItem(candidate, conflictPolicy, sourceSet, reservedDestinations, creatableDirectories));
-  }
-
-  const token = Crypto.randomBytes(12).toString("hex");
-  const movable = items.filter((item) => item.status === "ready");
-  const overwriteCount = movable.filter((item) => item.action === "overwrite").length;
-  const publicResult = {
-    token,
-    kind,
-    mode,
-    historyId,
-    conflictPolicy,
-    items,
-    directoriesToCreate: [...creatableDirectories].sort(comparePath),
-    summary: {
-      total: items.length,
-      ready: movable.length,
-      blocked: items.length - movable.length,
-      overwrite: overwriteCount,
-      renamed: movable.filter((item) => item.action === "rename").length,
-      createDirectory: creatableDirectories.size
-    },
-    requiresBackupConfirmation: overwriteCount > 0,
-    warning: overwriteCount > 0
-      ? "计划包含覆盖：目标文件会先通过 AssetDB 删除，反向计划无法恢复被覆盖的原目标。"
-      : "执行前请复核源路径与目标路径。移动将通过 Creator AssetDB 完成。"
-  };
-
-  return {
-    token,
-    kind,
-    mode,
-    historyId,
-    conflictPolicy,
-    rules,
-    directoriesToCreate: [...creatableDirectories],
-    items,
-    publicResult
-  };
-}
-
-function resolvePlanItem(candidate, conflictPolicy, sourceSet, reservedDestinations, creatableDirectories = new Set()) {
-  const source = normalizeRelativePath(candidate.source);
-  const requestedDestination = normalizeRelativePath(candidate.destination);
-  const base = {
-    source,
-    requestedDestination,
-    destination: requestedDestination,
-    ruleId: candidate.ruleId || "",
-    action: "move",
-    status: "ready",
-    reason: ""
-  };
-
-  if (!isInsideAssets(source) || source === "assets" || !pathExists(source)) {
-    return blocked(base, "源资源不存在或不允许移动");
-  }
-  if (!hasMeta(source)) {
-    return blocked(base, "源资源缺少 .meta");
-  }
-  if (!isInsideAssets(requestedDestination) || requestedDestination === "assets") {
-    return blocked(base, "目标路径不在 assets 下");
-  }
-  if (!statPath(Path.posix.dirname(requestedDestination))?.isDirectory() && !creatableDirectories.has(Path.posix.dirname(requestedDestination))) {
-    return blocked(base, "目标父目录不存在");
-  }
-  if (source === requestedDestination) {
-    return blocked(base, "资源已位于目标位置");
-  }
-  if (statPath(source)?.isDirectory() && isStrictlyInside(source, requestedDestination)) {
-    return blocked(base, "不能把目录移动到自身子目录");
-  }
-  if (sourceSet.has(requestedDestination)) {
-    return blocked(base, "目标同时是本批次源资源");
-  }
-
-  const targetExists = destinationOccupied(requestedDestination) || reservedDestinations.has(requestedDestination);
-  if (!targetExists) {
-    reservedDestinations.add(requestedDestination);
-    return base;
-  }
-
-  if (conflictPolicy === "skip") {
-    return blocked(base, "目标已存在，按策略跳过");
-  }
-
-  if (conflictPolicy === "rename") {
-    const destination = findAvailableDestination(requestedDestination, reservedDestinations);
-    reservedDestinations.add(destination);
-    return { ...base, destination, action: "rename" };
-  }
-
-  const sourceStat = statPath(source);
-  const targetStat = statPath(requestedDestination);
-  if (!sourceStat?.isFile() || !targetStat?.isFile()) {
-    return blocked(base, "覆盖仅允许文件覆盖现有文件");
-  }
-  if (!hasMeta(requestedDestination)) {
-    return blocked(base, "覆盖目标缺少 .meta");
-  }
-  if (reservedDestinations.has(requestedDestination)) {
-    return blocked(base, "同一计划中多个资源不能覆盖同一目标");
-  }
-
-  reservedDestinations.add(requestedDestination);
-  return { ...base, action: "overwrite" };
-}
-
-function blocked(item, reason) {
-  return { ...item, status: "blocked", reason };
-}
-
-function findAvailableDestination(requestedDestination, reservedDestinations) {
-  const parsed = Path.posix.parse(requestedDestination);
-  for (let index = 1; index < 10000; index++) {
-    const candidate = normalizeRelativePath(`${parsed.dir}/${parsed.name}_${index}${parsed.ext}`);
-    if (!destinationOccupied(candidate) && !reservedDestinations.has(candidate)) {
-      return candidate;
-    }
-  }
-  throw new Error(`无法为冲突资源生成可用名称：${requestedDestination}`);
-}
-
-function buildReversePlan(historyId, conflictPolicy) {
-  const profile = loadProfile();
-  const history = profile.history.find((item) => item.id === historyId);
-  if (!history) {
-    throw new Error("找不到所选历史记录。");
-  }
-
-  const candidates = history.moves.map((move) => ({
-    source: move.destination,
-    destination: move.source,
-    ruleId: "reverse"
-  }));
-  return finalizePlan({
-    mode: "history",
-    kind: "reverse",
-    historyId,
-    conflictPolicy: validateConflictPolicy(conflictPolicy),
-    candidates,
-    rules: [],
-    directoriesToCreate: [...new Set(candidates.map((item) => Path.posix.dirname(item.destination)).filter((target) => !pathExists(target)))]
-  });
-}
-
-async function executeMoves(payload) {
-  const token = String(payload?.token || "");
-  if (!lastPlan || token !== lastPlan.token) {
-    throw new Error("移动计划已失效，请重新预览。");
-  }
-
-  const readyItems = lastPlan.items.filter((item) => item.status === "ready");
-  if (readyItems.length === 0) {
-    throw new Error("当前计划没有可执行项。");
-  }
-  if (readyItems.some((item) => item.action === "overwrite") && payload?.backupConfirmed !== true) {
-    throw new Error("覆盖前必须确认已完成项目备份。");
-  }
-
-  const createdDirectories = await ensureAssetDirectories(lastPlan.directoriesToCreate);
-  const moved = [];
-  const failed = [];
-  for (const item of [...readyItems].sort((left, right) => right.source.length - left.source.length)) {
-    try {
-      validateItemBeforeExecution(item);
-      if (item.action === "overwrite") {
-        await Editor.Message.request("asset-db", "delete-asset", toDbUrl(item.destination));
-      }
-      await Editor.Message.request("asset-db", "move-asset", toDbUrl(item.source), toDbUrl(item.destination));
-      moved.push({
-        source: item.source,
-        destination: item.destination,
-        action: item.action,
-        overwrittenTargetRecoverable: item.action !== "overwrite"
-      });
-    } catch (error) {
-      failed.push({
-        source: item.source,
-        destination: item.destination,
-        message: error?.message || String(error)
-      });
-    }
-  }
-
-  const cleanup = payload?.cleanupEmptyDirectories === true
-    ? await cleanupEmptySourceDirectories(moved)
-    : { deletedDirectories: [], failedDirectories: [] };
-  const history = recordHistory(lastPlan, moved, failed, cleanup);
-  lastPlan = null;
-  return { moved, failed, createdDirectories, ...cleanup, history };
-}
-
-async function ensureAssetDirectories(directories) {
-  const missing = [...new Set((Array.isArray(directories) ? directories : [])
-    .map(normalizeRelativePath)
-    .filter((directory) => !pathExists(directory)))]
-    .sort((left, right) => left.length - right.length || comparePath(left, right));
-  if (missing.length === 0) {
-    return [];
-  }
-
-  const refreshRoots = new Set();
-  for (const directory of missing) {
-    validateRuleTarget(directory);
-    let ancestor = Path.posix.dirname(directory);
-    while (ancestor !== "assets" && !pathExists(ancestor)) {
-      ancestor = Path.posix.dirname(ancestor);
-    }
-    refreshRoots.add(ancestor);
-    Fs.mkdirSync(toProjectPath(directory), { recursive: true });
-  }
-
-  for (const root of refreshRoots) {
-    Editor.Message.send("asset-db", "refresh-asset", toDbUrl(root));
-  }
-  const imported = await waitUntil(() => missing.every((directory) => statPath(directory)?.isDirectory() && hasMeta(directory)), 10000);
-  if (!imported) {
-    throw new Error(`AssetDB 未能创建分类目录或生成 meta：${missing.filter((directory) => !hasMeta(directory)).join("、")}`);
-  }
-  return missing;
-}
-
-async function waitUntil(predicate, timeoutMs) {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < timeoutMs) {
-    if (predicate()) {
-      return true;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  return predicate();
-}
-
-async function cleanupEmptySourceDirectories(moved) {
-  const deletedDirectories = [];
-  const failedDirectories = [];
-  for (const directory of collectSourceDirectoryCandidates(moved)) {
-    try {
-      const stat = statPath(directory);
-      if (!stat?.isDirectory() || Fs.readdirSync(toProjectPath(directory)).length > 0) {
-        continue;
-      }
-      if (!hasMeta(directory)) {
-        throw new Error("空目录缺少 .meta，拒绝直接删除");
-      }
-      await Editor.Message.request("asset-db", "delete-asset", toDbUrl(directory));
-      if (!await waitUntil(() => !pathExists(directory), 3000)) {
-        throw new Error("AssetDB 删除后目录仍存在");
-      }
-      deletedDirectories.push(directory);
-    } catch (error) {
-      failedDirectories.push({
-        path: directory,
-        message: error?.message || String(error)
-      });
-    }
-  }
-  return { deletedDirectories, failedDirectories };
-}
-
-function collectSourceDirectoryCandidates(moved) {
-  const candidates = new Set();
-  for (const move of moved) {
-    let directory = Path.posix.dirname(move.source);
-    while (directory !== "assets" && isInsideAssets(directory)) {
-      if (!PROTECTED_CLEANUP_DIRECTORIES.has(directory)) {
-        candidates.add(directory);
-      }
-      directory = Path.posix.dirname(directory);
-    }
-  }
-  return [...candidates].sort((left, right) => right.length - left.length || comparePath(left, right));
-}
-
-function validateItemBeforeExecution(item) {
-  if (!pathExists(item.source) || !hasMeta(item.source)) {
-    throw new Error("执行前源资源不存在或缺少 .meta");
-  }
-  if (!statPath(Path.posix.dirname(item.destination))?.isDirectory()) {
-    throw new Error("执行前目标目录不存在");
-  }
-  if (item.action === "move" || item.action === "rename") {
-    if (destinationOccupied(item.destination)) {
-      throw new Error("执行前目标路径已被占用，请重新预览");
-    }
-  } else if (!statPath(item.destination)?.isFile()) {
-    throw new Error("覆盖目标已不存在或不是文件，请重新预览");
-  }
-}
-
-function recordHistory(plan, moved, failed, cleanup) {
-  if (moved.length === 0) {
-    return null;
-  }
-
-  const profile = loadProfile();
-  const history = {
-    id: `${Date.now()}-${Crypto.randomBytes(4).toString("hex")}`,
-    createdAt: new Date().toISOString(),
-    kind: plan.kind,
-    mode: plan.mode,
-    conflictPolicy: plan.conflictPolicy,
-    movedCount: moved.length,
-    failedCount: failed.length,
-    hasOverwrite: moved.some((item) => item.action === "overwrite"),
-    deletedDirectories: cleanup.deletedDirectories,
-    cleanupFailedCount: cleanup.failedDirectories.length,
-    failedMoves: failed,
-    failedDirectories: cleanup.failedDirectories,
-    moves: moved
-  };
-  profile.history.unshift(history);
-  profile.history = profile.history.slice(0, MAX_HISTORY);
-  saveProfile(profile);
-  return history;
+  return MovePlan.expandSelectedFiles(selectedPaths, { scanAssets });
 }
 
 function locateAsset(payload) {
@@ -3209,13 +2479,13 @@ exports._test = {
   normalizeRelativePath,
   normalizeExtensions,
   normalizeKeywords,
-  canonicalizeSelectedPaths,
+  canonicalizeSelectedPaths: MovePlan.canonicalizeSelectedPaths,
   destinationOccupied,
   expandSelectedFiles,
-  ruleMatchesSource,
-  collectSourceDirectoryCandidates,
-  findAvailableDestination,
-  resolvePlanItem,
+  ruleMatchesSource: MovePlan.ruleMatchesSource,
+  collectSourceDirectoryCandidates: MovePlan.collectSourceDirectoryCandidates,
+  findAvailableDestination: MovePlan.findAvailableDestination,
+  resolvePlanItem: MovePlan.resolvePlanItem,
   buildMovePlan,
   scanAssets,
   getHistoryDetail,

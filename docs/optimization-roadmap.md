@@ -18,6 +18,7 @@
 - 增加旧 `project-asset-mover` profile/log 兼容读取测试。
 - 增加报告导出 token 过滤测试，主进程会递归移除报告快照里的 `token` 字段。
 - 拆出 `panel/request.js` 和 `panel/format.js`，面板请求兼容转换与格式化工具已从大面板文件中分离。
+- 拆出 `main/path-utils.js`、`main/profile.js` 和 `main/move-plan.js`，路径工具、profile/log 读写、移动预览和执行已从 `main.js` 中分离。
 
 还没有完成：
 
@@ -34,9 +35,9 @@
 | 兼容 IPC 协议 | 已完成错误返回入口 | 80% | `main/protocol.js`、`toProtocol()`、`withProtocol()`、`requestMain()` | 继续细化不同错误码 |
 | 面板请求收敛 | 已拆出请求模块 | 80% | `panel/request.js`、`requestMain()`、`createAssetStewardError()` | 继续统一 loading、错误提示和日志 |
 | 危险操作审计 | 已完成第一版 | 65% | 移动失败明细持久化、删除备份 hash、`execution-result.json` | 增加恢复辅助入口、备份校验入口、审计报告聚合 |
-| 自动化测试 | 已覆盖阶段 1 收尾项 | 35% | `npm.cmd test` 通过 6 个测试 | 覆盖扫描、引用图、resources 检查和更多历史迁移 |
+| 自动化测试 | 已覆盖阶段 1 收尾项和首批模块拆分 | 40% | `npm.cmd test` 通过 11 个测试 | 覆盖扫描、引用图、resources 检查和更多历史迁移 |
 | 文档收敛 | 已完成起步 | 45% | `docs/architecture.md`、`docs/safety.md`、本文档 | 从 `FEATURES.md` 拆出 roadmap、用户手册、开发手册 |
-| 主进程模块拆分 | 未开始 | 0% | `main.js` 仍承载主要逻辑 | 拆成扫描、引用图、移动计划、删除审计、报告等模块 |
+| 主进程模块拆分 | 已完成首批拆分 | 30% | `main/path-utils.js`、`main/profile.js`、`main/move-plan.js`；`main.js` 仍承载扫描、引用图、删除审计、报告等逻辑 | 继续拆成扫描、引用图、删除审计、报告等模块 |
 | 面板模块拆分 | 已完成基础工具拆分 | 15% | `panel/request.js`、`panel/format.js`；`panel/main.js` 仍承载模板、样式、状态和渲染 | 按 Tab 或模块拆分状态、渲染、事件绑定 |
 | UI 风险总览 | 未开始 | 0% | 各 Tab 结果仍分散展示 | 增加全局风险摘要、推荐下一步、最近执行状态 |
 | 可拖拽缩放工作区 | 未开始 | 0% | 当前仍是固定 Tab 布局 | 实现窗口拖拽、缩放、布局保存、重置和平铺 |
@@ -76,12 +77,12 @@
 
 建议拆分：
 
-- `main/path-utils.js`：路径、AssetDB URL、项目路径、文件状态。
-- `main/profile.js`：profile、日志、历史迁移。
+- 已完成：`main/path-utils.js`：路径、AssetDB URL、项目路径、文件状态。
+- 已完成：`main/profile.js`：profile、日志、历史迁移。
 - `main/asset-scan.js`：资源扫描、meta 异常、类型统计。
 - `main/reference-graph.js`：UUID 提取、序列化资源引用、主场景可达图。
 - `main/runtime-resources.js`：`resources.load/loadDir` 静态检查。
-- `main/move-plan.js`：移动预览、冲突策略、反向计划、执行。
+- 已完成：`main/move-plan.js`：移动预览、冲突策略、反向计划、执行。
 - `main/unused-delete.js`：未引用删除预览、备份、manifest、执行审计。
 - `main/report.js`：Markdown/JSON 报告。
 
@@ -152,7 +153,7 @@
 
 ## 近期推荐顺序
 
-1. 拆 `main/path-utils.js`、`main/profile.js`、`main/move-plan.js`。
+1. 继续拆 `main/asset-scan.js`、`main/reference-graph.js`、`main/runtime-resources.js`。
 2. 做小窗口工作区第一版，只迁移资源扫描、引用检查、日志。
 3. 做总览风险面板。
 

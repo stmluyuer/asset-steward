@@ -25,6 +25,9 @@ global.Editor = {
 const extension = require("../main.js");
 const core = extension._test;
 const { compatibleSuccess } = require("../main/protocol");
+const pathUtils = require("../main/path-utils");
+const profile = require("../main/profile");
+const movePlan = require("../main/move-plan");
 
 function writeFile(relativePath, content = "") {
   const fullPath = Path.join(projectRoot, relativePath);
@@ -110,6 +113,22 @@ test("loadState and getLogs read legacy project-asset-mover files", () => {
   assert.equal(logs.ok, true);
   assert.equal(logs.logPath, "profiles/asset-steward.logs.json");
   assert.equal(logs.logs[0].message, "legacy log");
+});
+
+test("extracted main modules expose stable pure helpers", () => {
+  assert.equal(pathUtils.normalizeRelativePath("\\assets\\res\\fish.png\\"), "assets/res/fish.png");
+  assert.equal(pathUtils.toDbUrl("assets/res/fish.png"), "db://assets/res/fish.png");
+  assert.deepEqual(profile.normalizeExtensions("png, .JPG, png"), [".png", ".jpg"]);
+  assert.deepEqual(profile.normalizeKeywords("UI, ui, 按钮"), ["ui", "按钮"]);
+  assert.equal(movePlan.ruleMatchesSource({
+    extensions: [".png"],
+    nameKeywords: ["fish"]
+  }, "assets/res/fish.png"), true);
+  assert.deepEqual(movePlan.canonicalizeSelectedPaths([
+    "assets/res",
+    "assets/res/fish.png",
+    "assets/scene/main.scene"
+  ]), ["assets/res", "assets/scene/main.scene"]);
 });
 
 test("manual move plan remains compatible with existing preview fields", () => {
