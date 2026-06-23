@@ -38,7 +38,8 @@ function defaultProfile() {
   return {
     version: PROFILE_VERSION,
     rules: defaultRules(),
-    history: []
+    history: [],
+    toolVisibility: {}
   };
 }
 
@@ -67,7 +68,8 @@ function loadProfile() {
   return {
     version: PROFILE_VERSION,
     rules: sanitizeRules(profile.rules),
-    history: Array.isArray(profile.history) ? profile.history.slice(0, MAX_HISTORY) : []
+    history: Array.isArray(profile.history) ? profile.history.slice(0, MAX_HISTORY) : [],
+    toolVisibility: sanitizeToolVisibility(profile.toolVisibility)
   };
 }
 
@@ -75,7 +77,8 @@ function saveProfile(profile) {
   writeJson(getProfilePath(), {
     version: PROFILE_VERSION,
     rules: sanitizeRules(profile.rules),
-    history: Array.isArray(profile.history) ? profile.history.slice(0, MAX_HISTORY) : []
+    history: Array.isArray(profile.history) ? profile.history.slice(0, MAX_HISTORY) : [],
+    toolVisibility: sanitizeToolVisibility(profile.toolVisibility)
   });
 }
 
@@ -94,7 +97,8 @@ function migrateProfile(profile) {
   return {
     version: PROFILE_VERSION,
     rules: [...migratedDefaults, ...customRules],
-    history: Array.isArray(profile?.history) ? profile.history : []
+    history: Array.isArray(profile?.history) ? profile.history : [],
+    toolVisibility: sanitizeToolVisibility(profile?.toolVisibility)
   };
 }
 
@@ -103,6 +107,7 @@ function loadState() {
   return {
     rules: profile.rules,
     history: profile.history,
+    toolVisibility: profile.toolVisibility,
     profilePath: PROFILE_RELATIVE
   };
 }
@@ -227,11 +232,32 @@ function normalizeKeywords(value) {
   return [...new Set(values.map((item) => String(item).trim().toLowerCase()).filter(Boolean))];
 }
 
+function sanitizeToolVisibility(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  const visibility = {};
+  for (const [id, enabled] of Object.entries(value)) {
+    const normalizedId = String(id || "").trim();
+    if (normalizedId) {
+      visibility[normalizedId] = enabled !== false;
+    }
+  }
+  return visibility;
+}
+
 function saveRules(rules) {
   const profile = loadProfile();
   profile.rules = sanitizeRules(rules);
   saveProfile(profile);
   return { rules: profile.rules, profilePath: PROFILE_RELATIVE };
+}
+
+function saveToolVisibility(toolVisibility) {
+  const profile = loadProfile();
+  profile.toolVisibility = sanitizeToolVisibility(toolVisibility);
+  saveProfile(profile);
+  return { toolVisibility: profile.toolVisibility, profilePath: PROFILE_RELATIVE };
 }
 
 module.exports = {
@@ -246,7 +272,9 @@ module.exports = {
   appendLog,
   clearLogs,
   sanitizeRules,
+  sanitizeToolVisibility,
   normalizeExtensions,
   normalizeKeywords,
   saveRules,
+  saveToolVisibility,
 };

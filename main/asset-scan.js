@@ -21,6 +21,7 @@ const PROTECTED_CLEANUP_DIRECTORIES = new Set([
   "assets/scene",
   "assets/script"
 ]);
+const DEFAULT_ISSUE_IGNORE_PATTERNS = [".gitkeep"];
 
 function normalizeScanDirectory(value) {
   const directory = normalizeRelativePath(value || "assets") || "assets";
@@ -36,6 +37,7 @@ function normalizeScanDirectory(value) {
 function scanAssets(options) {
   const search = String(options?.search || "").trim().toLowerCase();
   const extensionFilter = normalizeExtensions(options?.extensions);
+  const issueIgnorePatterns = normalizeIssueIgnorePatterns(options?.issueIgnorePatterns ?? options?.issueIgnore ?? options?.ignoreIssues);
   const scanDirectory = normalizeScanDirectory(options?.directory || options?.scanDirectory);
   const scanRoot = toProjectPath(scanDirectory);
   const entries = [];
@@ -46,6 +48,7 @@ function scanAssets(options) {
   let missingMetaCount = 0;
   let orphanMetaCount = 0;
   let emptyDirectoryCount = 0;
+  let ignoredIssueCount = 0;
   let fileCount = 0;
   let directoryCount = 1;
   let totalSize = 0;
@@ -55,18 +58,23 @@ function scanAssets(options) {
     if (entry.isFile() && relative.toLowerCase().endsWith(".meta")) {
       const owner = relative.slice(0, -".meta".length);
       if (!pathExists(owner)) {
-        orphanMetaCount++;
         const ownerExtension = Path.extname(owner).toLowerCase();
-        if (matchesScanFilters(relative, false, ownerExtension, search, extensionFilter)) {
-          issueItems.push({
-            kind: "orphan-meta",
-            severity: "medium",
-            path: relative,
-            ownerPath: owner,
-            extension: ownerExtension || "(无扩展名)",
-            size: Fs.statSync(fullPath).size,
-            locatable: false
-          });
+        const issue = {
+          kind: "orphan-meta",
+          severity: "medium",
+          path: relative,
+          ownerPath: owner,
+          extension: ownerExtension || "(无扩展名)",
+          size: Fs.statSync(fullPath).size,
+          locatable: false
+        };
+        if (isIgnoredScanIssue(issue, issueIgnorePatterns)) {
+          ignoredIssueCount++;
+        } else {
+          orphanMetaCount++;
+          if (matchesScanFilters(relative, false, ownerExtension, search, extensionFilter)) {
+            issueItems.push(issue);
+          }
         }
       }
       return;
@@ -94,18 +102,24 @@ function scanAssets(options) {
     }
 
     const missingMeta = !hasMeta(relative);
+    const missingMetaIssue = missingMeta ? {
+      kind: "missing-meta",
+      severity: "high",
+      path: relative,
+      ownerPath: relative,
+      extension: isDirectory ? "(目录)" : extension || "(无扩展名)",
+      size,
+      locatable: true
+    } : null;
+    const ignoredMissingMeta = missingMetaIssue ? isIgnoredScanIssue(missingMetaIssue, issueIgnorePatterns) : false;
     if (missingMeta) {
-      missingMetaCount++;
-      if (matchesScanFilters(relative, isDirectory, extension, search, extensionFilter)) {
-        issueItems.push({
-          kind: "missing-meta",
-          severity: "high",
-          path: relative,
-          ownerPath: relative,
-          extension: isDirectory ? "(目录)" : extension || "(无扩展名)",
-          size,
-          locatable: true
-        });
+      if (ignoredMissingMeta) {
+        ignoredIssueCount++;
+      } else {
+        missingMetaCount++;
+        if (matchesScanFilters(relative, isDirectory, extension, search, extensionFilter)) {
+          issueItems.push(missingMetaIssue);
+        }
       }
     }
 
@@ -123,6 +137,7 @@ function scanAssets(options) {
       extension: isDirectory ? "(目录)" : extension || "(无扩展名)",
       size,
       missingMeta,
+      issueIgnored: ignoredMissingMeta,
       selectable: relative !== "assets"
     });
   });
@@ -132,17 +147,22 @@ function scanAssets(options) {
       continue;
     }
     if (isReportEmptyDirectory(directory)) {
-      emptyDirectoryCount++;
-      if (matchesScanFilters(directory, true, "", search, extensionFilter)) {
-        issueItems.push({
-          kind: "empty-directory",
-          severity: "low",
-          path: directory,
-          ownerPath: directory,
-          extension: "(目录)",
-          size: 0,
-          locatable: true
-        });
+      const issue = {
+        kind: "empty-directory",
+        severity: "low",
+        path: directory,
+        ownerPath: directory,
+        extension: "(目录)",
+        size: 0,
+        locatable: true
+      };
+      if (isIgnoredScanIssue(issue, issueIgnorePatterns)) {
+        ignoredIssueCount++;
+      } else {
+        emptyDirectoryCount++;
+        if (matchesScanFilters(directory, true, "", search, extensionFilter)) {
+          issueItems.push(issue);
+        }
       }
     }
   }
@@ -166,6 +186,8 @@ function scanAssets(options) {
       missingMetaCount,
       orphanMetaCount,
       emptyDirectoryCount,
+      ignoredIssueCount,
+      issueIgnorePatterns,
       visibleIssueCount: issueItems.length,
       typeCount: typeStats.length
     }
@@ -185,6 +207,31 @@ function matchesScanFilters(relativePath, isDirectory, extension, search, extens
   return true;
 }
 
+function normalizeIssueIgnorePatterns(value) {
+  const rawValues = value == null
+    ? DEFAULT_ISSUE_IGNORE_PATTERNS
+    : Array.isArray(value)
+      ? value
+      : String(value).split(/[\n,;]/);
+  return [...new Set(rawValues
+    .map((item) => normalizeRelativePath(String(item || "").trim()).toLowerCase())
+    .filter(Boolean))];
+}
+
+function isIgnoredScanIssue(issue, issueIgnorePatterns) {
+  return issueIgnorePatterns.some((pattern) => matchesIssueIgnorePattern(issue, pattern));
+}
+
+function matchesIssueIgnorePattern(issue, pattern) {
+  const issuePath = normalizeRelativePath(issue?.path || "").toLowerCase();
+  const ownerPath = normalizeRelativePath(issue?.ownerPath || "").toLowerCase();
+  const issueName = Path.basename(issuePath);
+  const ownerName = Path.basename(ownerPath);
+  return [issuePath, ownerPath, issueName, ownerName].some((value) =>
+    value === pattern || value.endsWith(`/${pattern}`) || value.includes(pattern)
+  );
+}
+
 function isReportEmptyDirectory(directory) {
   const stat = statPath(directory);
   if (!stat?.isDirectory()) {
@@ -202,8 +249,12 @@ function isReportEmptyDirectory(directory) {
 
 module.exports = {
   PROTECTED_CLEANUP_DIRECTORIES,
+  DEFAULT_ISSUE_IGNORE_PATTERNS,
   normalizeScanDirectory,
   scanAssets,
   matchesScanFilters,
+  normalizeIssueIgnorePatterns,
+  isIgnoredScanIssue,
+  matchesIssueIgnorePattern,
   isReportEmptyDirectory,
 };

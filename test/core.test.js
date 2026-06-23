@@ -31,6 +31,7 @@ const assetScan = require("../main/asset-scan");
 const referenceGraph = require("../main/reference-graph");
 const runtimeResources = require("../main/runtime-resources");
 const movePlan = require("../main/move-plan");
+const healthChecks = require("../main/health-checks");
 
 function writeFile(relativePath, content = "") {
   const fullPath = Path.join(projectRoot, relativePath);
@@ -118,6 +119,31 @@ test("loadState and getLogs read legacy project-asset-mover files", () => {
   assert.equal(logs.logs[0].message, "legacy log");
 });
 
+test("tool visibility persists in project profile", () => {
+  resetDirectory("profiles");
+
+  const saved = extension.methods.saveToolVisibility({
+    toolVisibility: {
+      "resources-runtime-check": false,
+      "package-size-report": true
+    }
+  });
+  const state = extension.methods.loadState();
+
+  assert.equal(saved.ok, true);
+  assert.equal(saved.toolVisibility["resources-runtime-check"], false);
+  assert.equal(saved.toolVisibility["package-size-report"], true);
+  assert.deepEqual(state.toolVisibility, saved.toolVisibility);
+  assert.deepEqual(profile.sanitizeToolVisibility({
+    "resources-runtime-check": false,
+    "": false,
+    "package-size-report": "yes"
+  }), {
+    "resources-runtime-check": false,
+    "package-size-report": true
+  });
+});
+
 test("extracted main modules expose stable pure helpers", () => {
   assert.equal(pathUtils.normalizeRelativePath("\\assets\\res\\fish.png\\"), "assets/res/fish.png");
   assert.equal(pathUtils.toDbUrl("assets/res/fish.png"), "db://assets/res/fish.png");
@@ -136,6 +162,17 @@ test("extracted main modules expose stable pure helpers", () => {
     extensions: [".png"],
     nameKeywords: ["fish"]
   }, "assets/res/fish.png"), true);
+  assert.equal(healthChecks.normalizeTopN(500), 200);
+  assert.deepEqual(healthChecks.collectMaterialTextureReferences({
+    albedo: {
+      __uuid__: "11111111-1111-4111-8111-111111111111",
+      __expectedType__: "cc.Texture2D"
+    }
+  }), [{
+    propertyPath: "albedo",
+    uuid: "11111111-1111-4111-8111-111111111111",
+    expectedType: "cc.Texture2D"
+  }]);
   assert.deepEqual(movePlan.canonicalizeSelectedPaths([
     "assets/res",
     "assets/res/fish.png",
@@ -160,6 +197,25 @@ test("manual move plan remains compatible with existing preview fields", () => {
   assert.equal(plan.publicResult.summary.ready, 1);
   assert.equal(plan.publicResult.items[0].source, "assets/source/fish.png");
   assert.equal(plan.publicResult.items[0].destination, "assets/dest/fish.png");
+});
+
+test("asset scan ignores configured issue paths like .gitkeep", () => {
+  resetDirectory("assets/ignore-scan");
+  writeDirectoryAsset("assets/ignore-scan");
+  writeFile("assets/ignore-scan/.gitkeep", "");
+  writeFile("assets/ignore-scan/real-missing.txt", "needs meta");
+
+  const result = assetScan.scanAssets({
+    directory: "assets/ignore-scan",
+    issueIgnorePatterns: ".gitkeep"
+  });
+
+  assert.equal(result.summary.missingMetaCount, 1);
+  assert.equal(result.summary.ignoredIssueCount, 1);
+  assert.deepEqual(result.issues.map((item) => item.path), ["assets/ignore-scan/real-missing.txt"]);
+  assert.equal(result.entries.find((item) => item.path.endsWith("/.gitkeep")).issueIgnored, true);
+  assert.deepEqual(assetScan.normalizeIssueIgnorePatterns(" .gitkeep, keep.txt "), [".gitkeep", "keep.txt"]);
+  assert.deepEqual(assetScan.normalizeIssueIgnorePatterns(""), []);
 });
 
 test("reference check keeps legacy details and target paths fields", () => {
@@ -189,6 +245,29 @@ test("reference check keeps legacy details and target paths fields", () => {
   assert.deepEqual(result.references[0].targetPaths, ["assets/reference/target.png"]);
   assert.equal(result.references[0].details[0].matchedUuid, uuid);
   assert.equal(result.references[0].details[0].nodePath, "Root");
+});
+
+test("selected asset path resolves current asset selection for reference checks", async () => {
+  writeAsset("assets/reference/selected.png", "selected");
+
+  const originalGetSelected = global.Editor.Selection.getSelected;
+  const originalRequest = global.Editor.Message.request;
+  global.Editor.Selection.getSelected = (type) => type === "asset" ? ["selected-uuid"] : [];
+  global.Editor.Message.request = async (channel, message, uuid) => {
+    assert.equal(channel, "asset-db");
+    assert.equal(message, "query-asset-info");
+    assert.equal(uuid, "selected-uuid");
+    return { url: "db://assets/reference/selected.png" };
+  };
+
+  try {
+    const result = await core.getSelectedAssetPath();
+    assert.deepEqual(result, { path: "assets/reference/selected.png" });
+    assert.equal(core.normalizeAssetPathCandidate("db://assets/reference/selected.png"), "assets/reference/selected.png");
+  } finally {
+    global.Editor.Selection.getSelected = originalGetSelected;
+    global.Editor.Message.request = originalRequest;
+  }
 });
 
 test("unused delete backup manifest records hashes and execution audit", () => {

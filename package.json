@@ -40,6 +40,11 @@
           "checkReferences"
         ]
       },
+      "get-selected-asset-path": {
+        "methods": [
+          "getSelectedAssetPath"
+        ]
+      },
       "select-reference-node": {
         "methods": [
           "selectReferenceNode"
@@ -133,6 +138,11 @@
       "save-rules": {
         "methods": [
           "saveRules"
+        ]
+      },
+      "save-tool-visibility": {
+        "methods": [
+          "saveToolVisibility"
         ]
       },
       "preview-moves": {
