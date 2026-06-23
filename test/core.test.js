@@ -27,6 +27,9 @@ const core = extension._test;
 const { compatibleSuccess } = require("../main/protocol");
 const pathUtils = require("../main/path-utils");
 const profile = require("../main/profile");
+const assetScan = require("../main/asset-scan");
+const referenceGraph = require("../main/reference-graph");
+const runtimeResources = require("../main/runtime-resources");
 const movePlan = require("../main/move-plan");
 
 function writeFile(relativePath, content = "") {
@@ -120,6 +123,15 @@ test("extracted main modules expose stable pure helpers", () => {
   assert.equal(pathUtils.toDbUrl("assets/res/fish.png"), "db://assets/res/fish.png");
   assert.deepEqual(profile.normalizeExtensions("png, .JPG, png"), [".png", ".jpg"]);
   assert.deepEqual(profile.normalizeKeywords("UI, ui, 按钮"), ["ui", "按钮"]);
+  assert.equal(assetScan.matchesScanFilters("assets/res/fish.png", false, ".png", "", [".png"]), true);
+  assert.deepEqual([...referenceGraph.extractGraphUuids("11111111-1111-4111-8111-111111111111@f9941")], ["11111111-1111-4111-8111-111111111111@f9941"]);
+  assert.equal(runtimeResources.parseStaticStringExpression("'fish/icon'"), "fish/icon");
+  assert.equal(runtimeResources.resourceMatchesRuntimeCall({
+    loadPath: "fish/icon"
+  }, {
+    method: "load",
+    runtimePath: "fish/icon/spriteFrame"
+  }), true);
   assert.equal(movePlan.ruleMatchesSource({
     extensions: [".png"],
     nameKeywords: ["fish"]
@@ -148,6 +160,35 @@ test("manual move plan remains compatible with existing preview fields", () => {
   assert.equal(plan.publicResult.summary.ready, 1);
   assert.equal(plan.publicResult.items[0].source, "assets/source/fish.png");
   assert.equal(plan.publicResult.items[0].destination, "assets/dest/fish.png");
+});
+
+test("reference check keeps legacy details and target paths fields", () => {
+  const uuid = "11111111-1111-4111-8111-111111111111";
+  writeFile("assets/reference/target.png", "target");
+  writeJson("assets/reference/target.png.meta", { uuid });
+  writeJson("assets/reference/holder.prefab", [{
+    __type__: "cc.Node",
+    _name: "Root",
+    _id: "node-root",
+    _components: [{ __id__: 1 }]
+  }, {
+    __type__: "cc.Sprite",
+    _node: { __id__: 0 },
+    spriteFrame: { __uuid__: uuid }
+  }]);
+  writeJson("assets/reference/holder.prefab.meta", { uuid: "22222222-2222-4222-8222-222222222222" });
+
+  const result = core.checkReferences({
+    paths: ["assets/reference/target.png"],
+    directory: "assets/reference",
+    extensions: ".prefab"
+  });
+
+  assert.equal(result.references.length, 1);
+  assert.deepEqual(result.references[0].matchedUuids, [uuid]);
+  assert.deepEqual(result.references[0].targetPaths, ["assets/reference/target.png"]);
+  assert.equal(result.references[0].details[0].matchedUuid, uuid);
+  assert.equal(result.references[0].details[0].nodePath, "Root");
 });
 
 test("unused delete backup manifest records hashes and execution audit", () => {
