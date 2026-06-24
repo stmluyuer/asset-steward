@@ -2,27 +2,128 @@
 
 const { requestMain } = require("./request");
 const {
+  buildOverviewSnapshot,
+  loadOverviewSnapshot,
+  saveOverviewSnapshot,
+  countKnownOverviewModules,
+  buildOverviewRisks: buildOverviewRisksFromState,
+  buildOverviewNextSteps: buildOverviewNextStepsFromState,
+  buildOverviewOperations: buildOverviewOperationsFromState,
+  sortOverviewItems,
+} = require("./overview");
+const {
+  renderOverview: renderOverviewView,
+} = require("./render/overview");
+const {
+  buildAssetScanResultState,
+  buildClassifyScanResultState,
+  buildDirectoryConventionResultState,
+  buildDuplicateAssetResultState,
+  buildHistoryDetailResultState,
+  buildMaterialTextureResultState,
+  buildNodeReferenceResultState,
+  buildOverviewState,
+  buildPackageSizeResultState,
+  buildReferenceResultState,
+  buildResourcesRuntimeResultState,
+  buildRuntimeLogsResultState,
+  buildScenePrefabReferenceHealthResultState,
+  buildSessionReportSnapshot: buildSessionReportSnapshotFromState,
+  buildUnusedScanResultState,
+  formatMoveExecutionResultMessage,
+  canExecuteMovePlan,
+  formatMovePlanExecutionConfirmMessage,
+  getMovePlanExecutionBlockReason,
+  isCompleteAssetScanResult,
+  isCompleteDirectoryConventionResult,
+  isCompleteDuplicateAssetResult,
+  isCompleteMaterialTextureResult,
+  isCompleteNodeReferenceResult,
+  isCompletePackageSizeResult,
+  isCompleteReferenceResult,
+  isCompleteResourcesRuntimeResult,
+  isCompleteScenePrefabReferenceHealthResult,
+  isCompleteUnusedResult,
+} = require("./state");
+const {
+  RESIZABLE_SPLIT_MIN_LEFT,
+  RESIZABLE_SPLIT_MIN_RIGHT,
+  RESIZABLE_SPLIT_MIN_TOP,
+  RESIZABLE_SPLIT_MIN_BOTTOM,
+  getTwoPanePresetLeftWidth,
+  formatTwoPanePresetName,
+  getPackageSizePresetColumns,
+  getPackageSizePresetTopHeight,
+  formatPackageSizePresetName,
+  loadResizableLayoutState,
+  saveResizableLayoutState,
+  removeResizableLayoutState,
+  getResizableStyleProperties,
+  buildResizableStoredValue,
+  getResizableSplitVariableName: getResizableSplitVariableNameFromIndex,
+  getResizableSplitAxis: getResizableSplitAxisFromDataset,
+  getResizeClientPosition,
+  clampResizableSplitSize,
+} = require("./layout");
+const {
+  renderResourcesRuntime: renderResourcesRuntimeView,
+  renderPackageSize: renderPackageSizeView,
+  renderDirectoryConvention: renderDirectoryConventionView,
+  renderMaterialTextures: renderMaterialTexturesView,
+  renderDuplicateAssets: renderDuplicateAssetsView,
+  renderScenePrefabReferenceHealth: renderScenePrefabReferenceHealthView,
+} = require("./render/health");
+const {
+  formatExportSessionReportSummary,
+  toHistorySummary,
+} = require("./history");
+const {
+  filterUnusedCandidates,
+} = require("./unused");
+const {
+  renderHistory: renderHistoryView,
+  renderHistoryDetail: renderHistoryDetailView,
+  renderLogs: renderLogsView,
+} = require("./render/history");
+const {
+  renderUnusedCandidates: renderUnusedCandidatesView,
+  renderUnusedDeletePlan: renderUnusedDeletePlanView,
+} = require("./render/unused");
+const {
+  renderAssetScanReport: renderAssetScanReportView,
+  renderReferences: renderReferencesView,
+} = require("./render/scan");
+const {
+  renderNodeReferences: renderNodeReferencesView,
+} = require("./render/node-reference");
+const {
+  clearClassifySelection,
+  filterSelectedPathsByEntries,
+  formatClassifyScanSummary,
+  selectVisibleClassifyEntries,
+  toggleClassifySelection,
+} = require("./classify");
+const {
+  renderClassifyAssets: renderClassifyAssetsView,
+  renderClassifyRules: renderClassifyRulesView,
+  renderClassifyPlan: renderClassifyPlanView,
+} = require("./render/classify");
+const {
+  TOOL_PANEL_MODULES,
+  normalizeToolVisibility,
+  isToolVisible,
+  buildAllToolsVisibility,
+  getToolTitle,
+} = require("./tool-panel");
+const {
+  renderToolPanel: renderToolPanelView,
+  applyToolVisibility: applyToolVisibilityView,
+} = require("./render/tool-panel");
+const {
   safeNumber,
-  normalizePanelExtensions,
-  formatAction,
-  formatLogLevel,
-  formatLogLevelClass,
-  formatRuntimeCallStatus,
-  formatRuntimeCallStatusClass,
-  formatMaterialTextureStatus,
-  formatMaterialTextureStatusClass,
-  formatShortHash,
   formatUnusedDeleteBackupScope,
-  formatIssueKind,
-  formatIssueSeverity,
-  formatIssueSeverityClass,
-  formatUuidList,
-  formatPathList,
-  formatReferenceChain,
   formatSize,
-  formatPercent,
   formatDate,
-  escapeHtml,
 } = require("./format");
 
 let entries = [];
@@ -30,6 +131,7 @@ let directories = [];
 let selectedPaths = new Set();
 let rules = [];
 let history = [];
+let classifyScanSummary = null;
 let currentPlan = null;
 let scanResourceEntries = [];
 let scanIssues = [];
@@ -67,19 +169,10 @@ let unusedSummary = null;
 let unusedSelectedPaths = new Set();
 let unusedDeletePlan = null;
 let toolVisibility = {};
+let overviewSnapshot = null;
 
 const RESIZABLE_SPLIT_STORAGE_KEY = "asset-steward.resizableSplits.v1";
-const RESIZABLE_SPLIT_MIN_LEFT = 260;
-const RESIZABLE_SPLIT_MIN_RIGHT = 260;
-const TOOL_PANEL_MODULES = [
-  { id: "scene-node-reference-check", title: "场景节点引用检查", group: "健康检查", selector: '[data-tool-module="scene-node-reference-check"]' },
-  { id: "resources-runtime-check", title: "resources 动态加载检查", group: "健康检查", selector: '[data-tool-module="resources-runtime-check"]' },
-  { id: "package-size-report", title: "包体贡献统计", group: "健康检查", selector: '[data-tool-module="package-size-report"]' },
-  { id: "directory-convention", title: "目录规范检查", group: "健康检查", selector: '[data-tool-module="directory-convention"]' },
-  { id: "material-textures", title: "材质贴图检查", group: "健康检查", selector: '[data-tool-module="material-textures"]' },
-  { id: "duplicate-assets", title: "重复资源检查", group: "健康检查", selector: '[data-tool-module="duplicate-assets"]' },
-  { id: "scene-prefab-reference-health", title: "场景和 Prefab 引用健康", group: "健康检查", selector: '[data-tool-module="scene-prefab-reference-health"]' }
-];
+const OVERVIEW_SNAPSHOT_STORAGE_KEY = "asset-steward.overviewSnapshot.v1";
 
 exports.template = `
 <section class="root">
@@ -89,7 +182,10 @@ exports.template = `
         <h2>项目资源管家</h2>
         <p>资源扫描、自动分类、未引用资源、健康检查和历史报告的治理入口。</p>
       </div>
-      <button id="toolPanelToggleButton">工具面板</button>
+      <div class="toolbox-actions">
+        <button id="resetResizableLayoutButton" title="恢复所有分栏宽度">重置布局</button>
+        <button id="toolPanelToggleButton">工具面板</button>
+      </div>
     </div>
     <section id="toolPanel" class="tool-panel hidden">
       <header class="tool-panel-header">
@@ -97,16 +193,53 @@ exports.template = `
         <button id="toolPanelEnableAllButton">全部开启</button>
       </header>
       <div id="toolPanelRows" class="tool-panel-rows"></div>
-      <div class="hint">关闭后对应功能块会从页面隐藏，配置保存到项目 profile。</div>
+      <div class="hint">关闭后对应功能页和顶部 Tab 会一起隐藏，配置保存到项目 profile。</div>
     </section>
     <nav id="tabBar" class="tab-bar">
+      <button class="tab-button active" data-tab="overview">总览</button>
       <button class="tab-button" data-tab="scan">资源扫描</button>
-      <button class="tab-button active" data-tab="classify">自动分类</button>
+      <button class="tab-button" data-tab="classify">自动分类</button>
       <button class="tab-button" data-tab="unused">未引用资源</button>
-      <button class="tab-button" data-tab="health">健康检查</button>
+      <button class="tab-button" data-tab="node-reference" data-tool-module="scene-node-reference-check">节点引用</button>
+      <button class="tab-button" data-tab="resources-runtime" data-tool-module="resources-runtime-check">resources 加载</button>
+      <button class="tab-button" data-tab="package-size" data-tool-module="package-size-report">包体统计</button>
+      <button class="tab-button" data-tab="directory-convention" data-tool-module="directory-convention">目录规范</button>
+      <button class="tab-button" data-tab="material-textures" data-tool-module="material-textures">材质贴图</button>
+      <button class="tab-button" data-tab="duplicate-assets" data-tool-module="duplicate-assets">重复资源</button>
+      <button class="tab-button" data-tab="scene-prefab-health" data-tool-module="scene-prefab-reference-health">场景引用</button>
       <button class="tab-button" data-tab="history">历史与报告</button>
     </nav>
   </header>
+
+  <section id="overviewTab" class="tab-page active overview-tab">
+    <section class="overview-hero">
+      <div>
+        <h3>风险总览</h3>
+        <div id="overviewSummary" class="summary">正在读取项目状态...</div>
+        <div id="overviewSnapshotSummary" class="hint">暂无跨会话风险快照。</div>
+      </div>
+      <div class="overview-actions">
+        <button id="overviewRunScanButton">扫描资源</button>
+        <button id="overviewRunHealthButton">一键健康检查</button>
+        <button id="overviewExportReportButton">导出报告</button>
+      </div>
+    </section>
+    <div class="overview-grid">
+      <section class="asset-section">
+        <h3>风险分组</h3>
+        <div id="overviewRiskRows" class="overview-list"></div>
+        <div id="overviewRiskEmpty" class="empty">暂无已知风险。运行资源扫描和健康检查后会汇总到这里。</div>
+      </section>
+      <section class="asset-section">
+        <h3>推荐下一步</h3>
+        <div id="overviewNextStepRows" class="overview-list"></div>
+      </section>
+      <section class="asset-section">
+        <h3>危险操作状态</h3>
+        <div id="overviewOperationRows" class="overview-list"></div>
+      </section>
+    </div>
+  </section>
 
   <section id="scanTab" class="tab-page">
     <header class="toolbar">
@@ -191,7 +324,7 @@ exports.template = `
     </section>
   </section>
 
-  <section id="classifyTab" class="tab-page active">
+  <section id="classifyTab" class="tab-page">
     <header class="toolbar">
       <label><span>搜索路径</span><input id="searchInput" placeholder="例如 prefab / Fish"></label>
       <label><span>扩展名</span><input id="extensionInput" placeholder=".prefab,.fbx"></label>
@@ -306,9 +439,16 @@ exports.template = `
     </section>
   </section>
 
-  <section id="healthTab" class="tab-page">
-    <section class="node-reference-panel" data-tool-module="scene-node-reference-check">
-      <h3>场景节点引用检查</h3>
+  <section id="nodeReferenceTab" class="tab-page tool-tab-page" data-tool-module="scene-node-reference-check">
+    <section class="node-reference-panel">
+      <div class="panel-title-row">
+        <h3>场景节点引用检查</h3>
+        <div class="layout-actions">
+          <button id="nodeReferenceTileLayoutButton" title="恢复节点引用的平铺布局">平铺</button>
+          <button id="nodeReferenceMaxLeftButton" title="放大目标节点列表">最大化目标</button>
+          <button id="nodeReferenceMaxRightButton" title="放大引用组件列表">最大化引用</button>
+        </div>
+      </div>
       <header class="toolbar">
         <label class="wide-field"><span>节点 ID</span><input id="nodeReferenceUuidInput" placeholder="留空时使用当前选中节点"></label>
         <label><span>扫描目录</span><input id="nodeReferenceDirectoryInput" value="assets"></label>
@@ -340,8 +480,18 @@ exports.template = `
         </section>
       </div>
     </section>
-    <section class="resources-runtime-panel" data-tool-module="resources-runtime-check">
-      <h3>resources 动态加载检查</h3>
+  </section>
+
+  <section id="resourcesRuntimeTab" class="tab-page tool-tab-page" data-tool-module="resources-runtime-check">
+    <section class="resources-runtime-panel">
+      <div class="panel-title-row">
+        <h3>resources 动态加载检查</h3>
+        <div class="layout-actions">
+          <button id="resourcesRuntimeTileLayoutButton" title="恢复 resources 检查的平铺布局">平铺</button>
+          <button id="resourcesRuntimeMaxLeftButton" title="放大疑似未加载资源列表">最大化资源</button>
+          <button id="resourcesRuntimeMaxRightButton" title="放大加载调用列表">最大化调用</button>
+        </div>
+      </div>
       <header class="toolbar">
         <label class="wide-field"><span>代码扫描目录</span><input id="resourcesCodeDirectoriesInput" value="assets/script,assets/scripts"></label>
         <label class="wide-field"><span>resources 目录</span><input id="resourcesDirectoryInput" value="assets/resources"></label>
@@ -382,8 +532,18 @@ exports.template = `
         </div>
       </details>
     </section>
-    <section class="package-size-panel" data-tool-module="package-size-report">
-      <h3>包体贡献统计</h3>
+  </section>
+
+  <section id="packageSizeTab" class="tab-page tool-tab-page" data-tool-module="package-size-report">
+    <section class="package-size-panel resizable-panel" data-resize-id="package-size-panel">
+      <div class="panel-title-row">
+        <h3>包体贡献统计</h3>
+        <div class="layout-actions">
+          <button id="packageSizeTileLayoutButton" title="恢复包体统计的平铺布局">平铺</button>
+          <button id="packageSizeMaxStatsButton" title="放大目录、类型和大文件三栏">最大化统计</button>
+          <button id="packageSizeMaxReferencedButton" title="放大主场景递归引用大文件列表">最大化引用</button>
+        </div>
+      </div>
       <header class="toolbar">
         <label><span>扫描目录</span><input id="packageSizeDirectoryInput" value="assets"></label>
         <label class="wide-field"><span>主场景</span><input id="packageSizeSceneInput" value="assets/scene/main.scene"></label>
@@ -392,7 +552,7 @@ exports.template = `
         <button id="packageSizeReportButton">统计体积</button>
       </header>
       <div class="summary" id="packageSizeSummary">统计项目源资源磁盘体积，不等同于最终构建包体。</div>
-      <div class="package-size-grid">
+      <div class="package-size-grid resizable-split" data-resize-id="package-size">
         <section class="asset-section">
           <h3>目录递归大小排行</h3>
           <div class="table-wrap">
@@ -403,6 +563,7 @@ exports.template = `
             <div id="packageDirectoryEmpty" class="empty">统计后显示扫描目录下所有子目录的递归大小。</div>
           </div>
         </section>
+        <div class="resize-handle" data-resize-handle title="拖拽调整宽度"></div>
         <section class="asset-section">
           <h3>类型大小排行</h3>
           <div class="table-wrap">
@@ -413,6 +574,7 @@ exports.template = `
             <div id="packageTypeEmpty" class="empty">统计后显示扩展名大小排行。</div>
           </div>
         </section>
+        <div class="resize-handle" data-resize-handle title="拖拽调整宽度"></div>
         <section class="asset-section">
           <h3>Top 大文件</h3>
           <div class="table-wrap">
@@ -424,6 +586,7 @@ exports.template = `
           </div>
         </section>
       </div>
+      <div class="resize-handle resize-handle-vertical" data-resize-handle data-resize-axis="y" data-resize-variable="top" title="拖拽调整高度"></div>
       <section class="referenced-size-section">
         <h3>Top 主场景递归引用大文件</h3>
         <p class="hint">只统计从主场景沿序列化 UUID 依赖链递归可达的资源；resources.load/loadDir 即使可静态识别也不计入。</p>
@@ -436,7 +599,10 @@ exports.template = `
         </div>
       </section>
     </section>
-    <section class="directory-convention-panel" data-tool-module="directory-convention">
+  </section>
+
+  <section id="directoryConventionTab" class="tab-page tool-tab-page" data-tool-module="directory-convention">
+    <section class="directory-convention-panel">
       <h3>目录规范检查</h3>
       <header class="toolbar">
         <label><span>扫描目录</span><input id="directoryConventionInput" value="assets/res"></label>
@@ -452,7 +618,10 @@ exports.template = `
         <div id="directoryConventionEmpty" class="empty">检查后显示目录不符合当前自动分类规则的资源。</div>
       </div>
     </section>
-    <section class="material-texture-panel" data-tool-module="material-textures">
+  </section>
+
+  <section id="materialTexturesTab" class="tab-page tool-tab-page" data-tool-module="material-textures">
+    <section class="material-texture-panel">
       <h3>材质贴图检查</h3>
       <header class="toolbar">
         <label><span>扫描目录</span><input id="materialTextureDirectoryInput" value="assets/res"></label>
@@ -468,8 +637,18 @@ exports.template = `
         <div id="materialTextureEmpty" class="empty">检查后同时显示正常材质贴图关系和待复核项。</div>
       </div>
     </section>
-    <section class="duplicate-asset-panel" data-tool-module="duplicate-assets">
-      <h3>重复资源检查</h3>
+  </section>
+
+  <section id="duplicateAssetsTab" class="tab-page tool-tab-page" data-tool-module="duplicate-assets">
+    <section class="duplicate-asset-panel">
+      <div class="panel-title-row">
+        <h3>重复资源检查</h3>
+        <div class="layout-actions">
+          <button id="duplicateAssetTileLayoutButton" title="恢复重复资源检查的平铺布局">平铺</button>
+          <button id="duplicateAssetMaxLeftButton" title="放大同名资源列表">最大化同名</button>
+          <button id="duplicateAssetMaxRightButton" title="放大重复内容列表">最大化内容</button>
+        </div>
+      </div>
       <header class="toolbar">
         <label><span>扫描目录</span><input id="duplicateAssetDirectoryInput" value="assets/res"></label>
         <button id="duplicateAssetCheckButton">检查重复资源</button>
@@ -499,7 +678,10 @@ exports.template = `
         </section>
       </div>
     </section>
-    <section class="scene-prefab-health-panel" data-tool-module="scene-prefab-reference-health">
+  </section>
+
+  <section id="scenePrefabHealthTab" class="tab-page tool-tab-page" data-tool-module="scene-prefab-reference-health">
+    <section class="scene-prefab-health-panel">
       <h3>场景和 Prefab 引用健康</h3>
       <header class="toolbar">
         <label><span>扫描目录</span><input id="scenePrefabHealthDirectoryInput" value="assets"></label>
@@ -546,6 +728,17 @@ exports.template = `
       </div>
       <div class="summary" id="exportSessionReportSummary">导出当前面板会话中已运行模块的最近结果、当前移动计划、历史摘要和日志。</div>
     </section>
+    <section class="history-panel maintenance-panel">
+      <h3>项目维护</h3>
+      <label><span>重载方式</span><select id="projectCacheReloadStrategySelect">
+        <option value="refresh-only">2A：刷新资源，必要时手动重开</option>
+        <option value="editor-reload">2B：执行编辑器级重载/重启</option>
+      </select></label>
+      <div class="rule-actions">
+        <button id="projectCacheCleanButton" class="danger">清理 library/temp</button>
+      </div>
+      <div class="summary" id="projectCacheCleanSummary">删除项目根目录下的 library 和 temp 缓存目录，然后按所选方式刷新或重载项目；执行前请先关闭预览和构建任务。</div>
+    </section>
     <section class="history-panel log-panel">
       <h3>运行日志</h3>
       <div class="rule-actions">
@@ -569,6 +762,7 @@ exports.style = `
 .root { box-sizing: border-box; color: #ddd; display: flex; flex-direction: column; font-size: 12px; height: 100%; padding: 10px; }
 .toolbox-header { border-bottom: 1px solid #444; margin-bottom: 10px; padding-bottom: 8px; }
 .toolbox-title-row { align-items: flex-start; display: flex; gap: 12px; justify-content: space-between; }
+.toolbox-actions { align-items: center; display: flex; flex: 0 0 auto; gap: 6px; }
 .toolbox-header h2 { color: #f2f2f2; font-size: 16px; margin: 0 0 4px; }
 .toolbox-header p { color: #aaa; margin: 0 0 8px; }
 .tool-panel { background: #242424; border: 1px solid #444; margin: 8px 0; padding: 8px; }
@@ -579,7 +773,7 @@ exports.style = `
 .tool-panel-row input { height: auto; }
 .tool-panel-row span { color: #ddd; }
 .tool-panel-row small { color: #999; margin-left: auto; }
-.tab-bar { align-items: center; display: flex; gap: 6px; }
+.tab-bar { align-items: center; display: flex; flex-wrap: wrap; gap: 6px; }
 .tab-button.active { background: #315273; border-color: #4b7ba7; color: #fff; }
 .tab-page { display: none; flex: 1; min-height: 0; }
 .tab-page.active { display: flex; flex-direction: column; }
@@ -595,6 +789,20 @@ button:disabled { cursor: default; opacity: .45; }
 .primary { background: #315273; border-color: #4b7ba7; }
 .danger { background: #653333; border-color: #9b4c4c; }
 .summary, .plan-summary { color: #bcdcff; min-height: 20px; padding: 4px 0; }
+.overview-tab { gap: 10px; overflow: auto; }
+.overview-hero { align-items: center; background: #242424; border: 1px solid #444; display: flex; gap: 12px; justify-content: space-between; padding: 12px; }
+.overview-hero h3 { color: #f2f2f2; font-size: 15px; margin: 0 0 4px; }
+.overview-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.overview-grid { display: grid; flex: 1; gap: 10px; grid-template-columns: minmax(320px, 1.1fr) minmax(280px, .9fr) minmax(280px, .9fr); min-height: 0; }
+.overview-list { display: flex; flex-direction: column; gap: 8px; overflow: auto; }
+.overview-row { border: 1px solid #3b3b3b; background: #202020; display: grid; gap: 5px; grid-template-columns: 1fr auto; padding: 8px; }
+.overview-row strong { color: #f2f2f2; font-size: 13px; }
+.overview-row p { color: #bdbdbd; grid-column: 1 / span 2; line-height: 1.45; margin: 0; white-space: normal; }
+.overview-row button { align-self: start; grid-column: 2; grid-row: 1; }
+.overview-score { color: #ffcf7a; font-size: 11px; margin-left: 6px; }
+.overview-row.warning { border-color: #8a6838; color: inherit; }
+.overview-row.blocked { border-color: #9b4c4c; color: inherit; }
+.overview-row.ready { border-color: #4f7d54; color: inherit; }
 .workspace { display: grid; flex: 1; gap: 10px; grid-template-columns: var(--split-left, minmax(560px, 1fr)) 8px minmax(280px, 360px); min-height: 260px; }
 .scan-workspace { display: grid; flex: 1; gap: 10px; grid-template-columns: var(--split-left, minmax(560px, 1fr)) 8px minmax(280px, 360px); min-height: 0; }
 .scan-resource-section { flex: 0 0 180px; margin-bottom: 10px; }
@@ -640,13 +848,17 @@ th { background: #252525; position: sticky; top: 0; z-index: 1; }
 .feature-card h3, .history-panel h3, .node-reference-panel h3, .resources-runtime-panel h3, .package-size-panel h3, .directory-convention-panel h3, .material-texture-panel h3, .duplicate-asset-panel h3, .scene-prefab-health-panel h3, .unused-scan-panel h3, .unused-delete-panel h3 { color: #f2f2f2; font-size: 14px; margin: 0 0 8px; }
 .feature-card p { color: #bdbdbd; line-height: 1.6; margin: 0; }
 .warning-card { border-color: #8a6838; }
+.panel-title-row { align-items: center; display: flex; gap: 10px; justify-content: space-between; margin-bottom: 8px; }
+.panel-title-row h3 { margin: 0 !important; }
+.layout-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.layout-actions button { min-height: 23px; padding: 0 8px; }
 .resources-runtime-panel { flex: 0 0 auto; margin-bottom: 10px; }
 .resources-runtime-grid { display: grid; gap: 10px; grid-template-columns: var(--split-left, minmax(360px, .9fr)) 8px minmax(420px, 1.4fr); height: 250px; }
 .resources-all-details { margin-top: 10px; }
 .resources-all-details summary { color: #bcdcff; cursor: pointer; }
 .resources-all-table { height: 180px; margin-top: 8px; }
 .package-size-panel { flex: 0 0 auto; margin-bottom: 10px; }
-.package-size-grid { display: grid; gap: 10px; grid-template-columns: minmax(360px, 1fr) minmax(280px, .75fr) minmax(420px, 1.2fr); height: 260px; }
+.package-size-grid { display: grid; gap: 10px; grid-template-columns: var(--split-left, minmax(360px, 1fr)) 8px var(--split-middle, minmax(280px, .75fr)) 8px minmax(420px, 1.2fr); height: var(--split-top, 260px); }
 .referenced-size-section { border: 1px solid #444; margin-top: 10px; padding: 8px; }
 .referenced-size-table { height: 230px; }
 .reference-chain { max-width: 720px; white-space: normal; }
@@ -666,7 +878,7 @@ th { background: #252525; position: sticky; top: 0; z-index: 1; }
 .unused-delete-panel .toolbar { flex-wrap: wrap; }
 .unused-delete-table { flex: 0 0 180px; height: 180px; }
 .inline-check input { height: auto; }
-#healthTab { overflow: auto; }
+.tool-tab-page { overflow: auto; }
 .node-reference-panel { flex: 0 0 auto; margin-bottom: 10px; }
 .node-reference-grid { display: grid; gap: 10px; grid-template-columns: var(--split-left, minmax(360px, .9fr)) 8px minmax(420px, 1.4fr); height: 260px; }
 .node-reference-table { height: 220px; }
@@ -675,26 +887,45 @@ th { background: #252525; position: sticky; top: 0; z-index: 1; }
 .history-panel button { margin-bottom: 8px; }
 .history-detail-table { height: 220px; margin-top: 8px; }
 .history-cleanup-details summary { color: #bcdcff; cursor: pointer; }
-.report-panel { margin-top: 10px; max-width: none; }
+.report-panel, .maintenance-panel { margin-top: 10px; max-width: none; }
 .log-panel { margin-top: 10px; max-width: none; }
 .log-table { height: 220px; }
 .resize-handle { align-self: stretch; background: #343434; border-left: 1px solid #4a4a4a; border-right: 1px solid #242424; cursor: col-resize; min-height: 100%; touch-action: none; user-select: none; }
 .resize-handle:hover, .resize-handle.dragging { background: #4b7ba7; border-left-color: #6da2cf; }
+.resize-handle-vertical { border-left: 0; border-right: 0; border-top: 1px solid #4a4a4a; border-bottom: 1px solid #242424; cursor: row-resize; height: 8px; margin-top: 10px; min-height: 8px; }
 .resizable-split > .asset-section, .resizable-split > .settings { min-width: 0; }
 body.resizing-split { cursor: col-resize; user-select: none; }
+body.resizing-split-y { cursor: row-resize; user-select: none; }
 footer { color: #ffcf7a; min-height: 22px; padding-top: 7px; }
 `;
 
 exports.$ = {
+  resetResizableLayoutButton: "#resetResizableLayoutButton",
   toolPanelToggleButton: "#toolPanelToggleButton",
   toolPanelEnableAllButton: "#toolPanelEnableAllButton",
   toolPanel: "#toolPanel",
   toolPanelRows: "#toolPanelRows",
+  overviewTab: "#overviewTab",
+  overviewSummary: "#overviewSummary",
+  overviewSnapshotSummary: "#overviewSnapshotSummary",
+  overviewRiskRows: "#overviewRiskRows",
+  overviewRiskEmpty: "#overviewRiskEmpty",
+  overviewNextStepRows: "#overviewNextStepRows",
+  overviewOperationRows: "#overviewOperationRows",
+  overviewRunScanButton: "#overviewRunScanButton",
+  overviewRunHealthButton: "#overviewRunHealthButton",
+  overviewExportReportButton: "#overviewExportReportButton",
   tabBar: "#tabBar",
   scanTab: "#scanTab",
   classifyTab: "#classifyTab",
   unusedTab: "#unusedTab",
-  healthTab: "#healthTab",
+  nodeReferenceTab: "#nodeReferenceTab",
+  resourcesRuntimeTab: "#resourcesRuntimeTab",
+  packageSizeTab: "#packageSizeTab",
+  directoryConventionTab: "#directoryConventionTab",
+  materialTexturesTab: "#materialTexturesTab",
+  duplicateAssetsTab: "#duplicateAssetsTab",
+  scenePrefabHealthTab: "#scenePrefabHealthTab",
   historyTab: "#historyTab",
   assetScanSearchInput: "#assetScanSearchInput",
   assetScanExtensionInput: "#assetScanExtensionInput",
@@ -722,6 +953,9 @@ exports.$ = {
   nodeReferenceDirectoryInput: "#nodeReferenceDirectoryInput",
   nodeReferenceExtensionInput: "#nodeReferenceExtensionInput",
   nodeReferenceCheckButton: "#nodeReferenceCheckButton",
+  nodeReferenceTileLayoutButton: "#nodeReferenceTileLayoutButton",
+  nodeReferenceMaxLeftButton: "#nodeReferenceMaxLeftButton",
+  nodeReferenceMaxRightButton: "#nodeReferenceMaxRightButton",
   nodeReferenceSummary: "#nodeReferenceSummary",
   nodeReferenceTargetRows: "#nodeReferenceTargetRows",
   nodeReferenceTargetEmpty: "#nodeReferenceTargetEmpty",
@@ -747,6 +981,9 @@ exports.$ = {
   resourcesCodeDirectoriesInput: "#resourcesCodeDirectoriesInput",
   resourcesDirectoryInput: "#resourcesDirectoryInput",
   resourcesRuntimeCheckButton: "#resourcesRuntimeCheckButton",
+  resourcesRuntimeTileLayoutButton: "#resourcesRuntimeTileLayoutButton",
+  resourcesRuntimeMaxLeftButton: "#resourcesRuntimeMaxLeftButton",
+  resourcesRuntimeMaxRightButton: "#resourcesRuntimeMaxRightButton",
   resourcesRuntimeSummary: "#resourcesRuntimeSummary",
   resourcesUnusedRows: "#resourcesUnusedRows",
   resourcesUnusedEmpty: "#resourcesUnusedEmpty",
@@ -759,6 +996,9 @@ exports.$ = {
   packageSizeTopNInput: "#packageSizeTopNInput",
   packageSizeIncludeMetaInput: "#packageSizeIncludeMetaInput",
   packageSizeReportButton: "#packageSizeReportButton",
+  packageSizeTileLayoutButton: "#packageSizeTileLayoutButton",
+  packageSizeMaxStatsButton: "#packageSizeMaxStatsButton",
+  packageSizeMaxReferencedButton: "#packageSizeMaxReferencedButton",
   packageSizeSummary: "#packageSizeSummary",
   packageDirectoryRows: "#packageDirectoryRows",
   packageDirectoryEmpty: "#packageDirectoryEmpty",
@@ -782,6 +1022,9 @@ exports.$ = {
   materialTextureEmpty: "#materialTextureEmpty",
   duplicateAssetDirectoryInput: "#duplicateAssetDirectoryInput",
   duplicateAssetCheckButton: "#duplicateAssetCheckButton",
+  duplicateAssetTileLayoutButton: "#duplicateAssetTileLayoutButton",
+  duplicateAssetMaxLeftButton: "#duplicateAssetMaxLeftButton",
+  duplicateAssetMaxRightButton: "#duplicateAssetMaxRightButton",
   duplicateAssetSummary: "#duplicateAssetSummary",
   duplicateSameNameRows: "#duplicateSameNameRows",
   duplicateSameNameEmpty: "#duplicateSameNameEmpty",
@@ -796,6 +1039,9 @@ exports.$ = {
   scenePrefabHealthEmpty: "#scenePrefabHealthEmpty",
   exportSessionReportButton: "#exportSessionReportButton",
   exportSessionReportSummary: "#exportSessionReportSummary",
+  projectCacheReloadStrategySelect: "#projectCacheReloadStrategySelect",
+  projectCacheCleanButton: "#projectCacheCleanButton",
+  projectCacheCleanSummary: "#projectCacheCleanSummary",
   searchInput: "#searchInput",
   extensionInput: "#extensionInput",
   scanButton: "#scanButton",
@@ -838,12 +1084,25 @@ exports.ready = async function () {
     button.addEventListener("click", () => activateTab(panel, button.dataset.tab));
   });
   initializeResizableSplits();
+  panel.$.resetResizableLayoutButton.addEventListener("click", () => resetResizableLayout(panel));
   panel.$.toolPanelToggleButton.addEventListener("click", () => toggleToolPanel(panel));
   panel.$.toolPanelEnableAllButton.addEventListener("click", () => enableAllTools(panel));
+  panel.$.overviewRunScanButton.addEventListener("click", () => {
+    activateTab(panel, "scan");
+    scanAssetReport(panel);
+  });
+  panel.$.overviewRunHealthButton.addEventListener("click", () => runOverviewHealthChecks(panel));
+  panel.$.overviewExportReportButton.addEventListener("click", () => {
+    activateTab(panel, "history");
+    exportSessionReport(panel);
+  });
   panel.$.assetScanButton.addEventListener("click", () => scanAssetReport(panel));
   panel.$.referenceSelectedAssetButton.addEventListener("click", () => checkReferenceForSelectedAsset(panel));
   panel.$.referenceCheckButton.addEventListener("click", () => checkReferences(panel));
   panel.$.nodeReferenceCheckButton.addEventListener("click", () => checkNodeReferences(panel));
+  panel.$.nodeReferenceTileLayoutButton.addEventListener("click", () => applyTwoPaneLayoutPreset(panel, "node-reference", "tile", "节点引用"));
+  panel.$.nodeReferenceMaxLeftButton.addEventListener("click", () => applyTwoPaneLayoutPreset(panel, "node-reference", "left", "节点引用"));
+  panel.$.nodeReferenceMaxRightButton.addEventListener("click", () => applyTwoPaneLayoutPreset(panel, "node-reference", "right", "节点引用"));
   panel.$.unusedScanButton.addEventListener("click", () => scanUnusedAssets(panel));
   panel.$.unusedSearchInput.addEventListener("input", () => renderUnusedCandidates(panel));
   panel.$.unusedExtensionInput.addEventListener("input", () => renderUnusedCandidates(panel));
@@ -853,11 +1112,20 @@ exports.ready = async function () {
   panel.$.unusedDeleteExecuteButton.addEventListener("click", () => executeUnusedDelete(panel));
   panel.$.unusedDeleteConfirmedInput.addEventListener("change", () => renderUnusedDeletePlan(panel));
   panel.$.resourcesRuntimeCheckButton.addEventListener("click", () => checkResourcesRuntime(panel));
+  panel.$.resourcesRuntimeTileLayoutButton.addEventListener("click", () => applyTwoPaneLayoutPreset(panel, "resources-runtime", "tile", "resources 检查"));
+  panel.$.resourcesRuntimeMaxLeftButton.addEventListener("click", () => applyTwoPaneLayoutPreset(panel, "resources-runtime", "left", "resources 检查"));
+  panel.$.resourcesRuntimeMaxRightButton.addEventListener("click", () => applyTwoPaneLayoutPreset(panel, "resources-runtime", "right", "resources 检查"));
   panel.$.packageSizeReportButton.addEventListener("click", () => reportPackageSize(panel));
+  panel.$.packageSizeTileLayoutButton.addEventListener("click", () => applyPackageSizeLayoutPreset(panel, "tile"));
+  panel.$.packageSizeMaxStatsButton.addEventListener("click", () => applyPackageSizeLayoutPreset(panel, "stats"));
+  panel.$.packageSizeMaxReferencedButton.addEventListener("click", () => applyPackageSizeLayoutPreset(panel, "referenced"));
   panel.$.directoryConventionCheckButton.addEventListener("click", () => checkDirectoryConvention(panel));
   panel.$.directoryConventionPreviewButton.addEventListener("click", () => previewDirectoryConvention(panel));
   panel.$.materialTextureCheckButton.addEventListener("click", () => checkMaterialTextures(panel));
   panel.$.duplicateAssetCheckButton.addEventListener("click", () => checkDuplicateAssets(panel));
+  panel.$.duplicateAssetTileLayoutButton.addEventListener("click", () => applyTwoPaneLayoutPreset(panel, "duplicate-assets", "tile", "重复资源检查"));
+  panel.$.duplicateAssetMaxLeftButton.addEventListener("click", () => applyTwoPaneLayoutPreset(panel, "duplicate-assets", "left", "重复资源检查"));
+  panel.$.duplicateAssetMaxRightButton.addEventListener("click", () => applyTwoPaneLayoutPreset(panel, "duplicate-assets", "right", "重复资源检查"));
   panel.$.scenePrefabHealthCheckButton.addEventListener("click", () => checkScenePrefabReferenceHealth(panel));
   panel.$.scanButton.addEventListener("click", () => scan(panel));
   panel.$.selectVisibleButton.addEventListener("click", () => selectVisible(panel));
@@ -871,17 +1139,27 @@ exports.ready = async function () {
   panel.$.reverseButton.addEventListener("click", () => previewReverse(panel));
   panel.$.clearLogButton.addEventListener("click", () => clearLogs(panel));
   panel.$.exportSessionReportButton.addEventListener("click", () => exportSessionReport(panel));
+  panel.$.projectCacheCleanButton.addEventListener("click", () => cleanProjectCache(panel));
+  overviewSnapshot = loadOverviewSnapshot(localStorage, OVERVIEW_SNAPSHOT_STORAGE_KEY);
   await loadState(panel);
   await loadLogs(panel);
   await scan(panel);
+  renderOverview(panel);
 };
 
 function activateTab(panel, tabName) {
   const tabs = {
+    overview: panel.$.overviewTab,
     scan: panel.$.scanTab,
     classify: panel.$.classifyTab,
     unused: panel.$.unusedTab,
-    health: panel.$.healthTab,
+    "node-reference": panel.$.nodeReferenceTab,
+    "resources-runtime": panel.$.resourcesRuntimeTab,
+    "package-size": panel.$.packageSizeTab,
+    "directory-convention": panel.$.directoryConventionTab,
+    "material-textures": panel.$.materialTexturesTab,
+    "duplicate-assets": panel.$.duplicateAssetsTab,
+    "scene-prefab-health": panel.$.scenePrefabHealthTab,
     history: panel.$.historyTab,
   };
   for (const [name, tab] of Object.entries(tabs)) {
@@ -890,19 +1168,103 @@ function activateTab(panel, tabName) {
   panel.$.tabBar.querySelectorAll(".tab-button").forEach((button) => {
     button.classList.toggle("active", button.dataset.tab === tabName);
   });
+  if (tabName === "overview") {
+    renderOverview(panel);
+  }
 }
 
-function normalizeToolVisibility(value) {
-  const source = value && typeof value === "object" ? value : {};
-  const visibility = {};
-  for (const module of TOOL_PANEL_MODULES) {
-    visibility[module.id] = source[module.id] !== false;
+function renderOverview(panel) {
+  const overviewState = getOverviewState();
+  const risks = sortOverviewItems(buildOverviewRisksFromState(overviewState, { formatSize }));
+  const nextSteps = buildOverviewNextStepsFromState(risks, overviewState);
+  const operations = buildOverviewOperationsFromState(overviewState, { formatDate });
+  const knownModules = countKnownOverviewModules(overviewState);
+  const currentSnapshot = buildOverviewSnapshot(risks, knownModules);
+  if (knownModules > 0) {
+    overviewSnapshot = currentSnapshot;
+    saveOverviewSnapshot(localStorage, OVERVIEW_SNAPSHOT_STORAGE_KEY, currentSnapshot);
   }
-  return visibility;
+  renderOverviewView(panel, {
+    risks,
+    nextSteps,
+    operations,
+    knownModules,
+    currentSnapshot,
+    previousSnapshot: overviewSnapshot,
+  }, {
+    formatDate,
+    onAction: (item) => handleOverviewAction(panel, item),
+  });
+}
+
+function getOverviewState() {
+  return buildOverviewState({
+    classifyScanSummary,
+    scanReportSummary,
+    unusedSummary,
+    resourcesRuntimeSummary,
+    packageSizeSummary,
+    directoryConventionSummary,
+    materialTextureSummary,
+    duplicateAssetSummary,
+    scenePrefabReferenceSummary,
+    currentPlan,
+    unusedDeletePlan,
+    history,
+    runtimeLogs
+  });
+}
+
+function handleOverviewAction(panel, item) {
+  if (item.run === "asset-scan") {
+    activateTab(panel, "scan");
+    scanAssetReport(panel);
+    return;
+  }
+  if (item.run === "export-report") {
+    activateTab(panel, "history");
+    exportSessionReport(panel);
+    return;
+  }
+  if (item.run === "health-checks") {
+    runOverviewHealthChecks(panel);
+    return;
+  }
+  activateTab(panel, item.tab || "overview");
+  if (item.selector) {
+    const target = document.querySelector(item.selector);
+    target?.scrollIntoView?.({ block: "start", behavior: "smooth" });
+  }
+}
+
+async function runOverviewHealthChecks(panel) {
+  const tasks = [];
+  if (isToolEnabled("resources-runtime-check")) {
+    tasks.push(["resources 动态加载检查", "resources-runtime", () => checkResourcesRuntime(panel)]);
+  }
+  if (isToolEnabled("package-size-report")) {
+    tasks.push(["包体贡献统计", "package-size", () => reportPackageSize(panel)]);
+  }
+  if (isToolEnabled("scene-prefab-reference-health")) {
+    tasks.push(["场景和 Prefab 引用健康", "scene-prefab-health", () => checkScenePrefabReferenceHealth(panel)]);
+  }
+  if (tasks.length === 0) {
+    setStatus(panel, "当前没有启用可从总览一键运行的健康检查模块。");
+    return;
+  }
+  await addLog(panel, "info", `总览一键健康检查开始：${tasks.map(([name]) => name).join("、")}`);
+  for (const [name, tab, run] of tasks) {
+    activateTab(panel, tab);
+    setStatus(panel, `总览一键健康检查：正在运行 ${name}...`);
+    await run();
+  }
+  activateTab(panel, "overview");
+  renderOverview(panel);
+  setStatus(panel, "总览一键健康检查已完成。");
 }
 
 function isToolEnabled(id) {
-  return toolVisibility[id] !== false;
+  return isToolVisible(toolVisibility, id);
 }
 
 function toggleToolPanel(panel) {
@@ -910,26 +1272,16 @@ function toggleToolPanel(panel) {
 }
 
 function renderToolPanel(panel) {
-  panel.$.toolPanelRows.innerHTML = "";
-  for (const module of TOOL_PANEL_MODULES) {
-    const row = document.createElement("label");
-    row.className = "tool-panel-row";
-    row.innerHTML = `
-      <input type="checkbox" ${isToolEnabled(module.id) ? "checked" : ""} data-tool-toggle="${escapeHtml(module.id)}">
-      <span>${escapeHtml(module.title)}</span>
-      <small>${escapeHtml(module.group)}</small>
-    `;
-    row.querySelector("input").addEventListener("change", (event) => updateToolVisibility(panel, module.id, event.target.checked));
-    panel.$.toolPanelRows.appendChild(row);
-  }
+  renderToolPanelView(panel, TOOL_PANEL_MODULES, toolVisibility, {
+    onVisibilityChange: (id, enabled) => updateToolVisibility(panel, id, enabled),
+  });
 }
 
 function applyToolVisibility(panel) {
-  for (const module of TOOL_PANEL_MODULES) {
-    const enabled = isToolEnabled(module.id);
-    document.querySelectorAll(module.selector).forEach((element) => {
-      element.classList.toggle("hidden", !enabled);
-    });
+  applyToolVisibilityView(TOOL_PANEL_MODULES, toolVisibility);
+  const activeButton = panel.$.tabBar.querySelector(".tab-button.active");
+  if (activeButton?.classList.contains("hidden")) {
+    activateTab(panel, "overview");
   }
 }
 
@@ -945,18 +1297,14 @@ async function updateToolVisibility(panel, id, enabled) {
     toolVisibility = normalizeToolVisibility(result.toolVisibility);
     renderToolPanel(panel);
     applyToolVisibility(panel);
-    setStatus(panel, `工具面板已保存：${TOOL_PANEL_MODULES.find((item) => item.id === id)?.title || id} ${enabled ? "开启" : "关闭"}。`);
+    setStatus(panel, `工具面板已保存：${getToolTitle(id)} ${enabled ? "开启" : "关闭"}。`);
   } catch (error) {
     setStatus(panel, `保存工具面板失败：${error.message}`);
   }
 }
 
 async function enableAllTools(panel) {
-  const nextVisibility = {};
-  for (const module of TOOL_PANEL_MODULES) {
-    nextVisibility[module.id] = true;
-  }
-  toolVisibility = normalizeToolVisibility(nextVisibility);
+  toolVisibility = buildAllToolsVisibility(TOOL_PANEL_MODULES);
   renderToolPanel(panel);
   applyToolVisibility(panel);
   try {
@@ -974,38 +1322,87 @@ function initializeResizableSplits() {
   const saved = loadResizableSplitState();
   for (const split of document.querySelectorAll("[data-resize-id]")) {
     const resizeId = split.dataset.resizeId;
-    if (saved[resizeId]) {
-      split.style.setProperty("--split-left", `${saved[resizeId]}px`);
+    applyResizableSplitState(split, saved[resizeId]);
+    for (const handle of split.querySelectorAll("[data-resize-handle]")) {
+      if (handle.closest("[data-resize-id]") !== split) {
+        continue;
+      }
+      handle.addEventListener("mousedown", (event) => startResizableSplitDrag(split, handle, event, "mouse"));
+      handle.addEventListener("touchstart", (event) => startResizableSplitDrag(split, handle, event, "touch"), { passive: false });
     }
-    const handle = split.querySelector("[data-resize-handle]");
-    if (!handle) {
-      continue;
-    }
-    handle.addEventListener("mousedown", (event) => startResizableSplitDrag(split, handle, event, "mouse"));
-    handle.addEventListener("touchstart", (event) => startResizableSplitDrag(split, handle, event, "touch"), { passive: false });
   }
 }
 
 function loadResizableSplitState() {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(RESIZABLE_SPLIT_STORAGE_KEY) || "{}");
-    return parsed && typeof parsed === "object" ? parsed : {};
-  } catch (_error) {
-    return {};
+  return loadResizableLayoutState(localStorage, RESIZABLE_SPLIT_STORAGE_KEY);
+}
+
+function applyResizableSplitState(split, value) {
+  for (const [name, size] of Object.entries(getResizableStyleProperties(value))) {
+    split.style.setProperty(`--split-${name}`, `${size}px`);
   }
 }
 
-function saveResizableSplitWidth(resizeId, width) {
+function saveResizableSplitValue(resizeId, value) {
   if (!resizeId) {
     return;
   }
   const state = loadResizableSplitState();
-  state[resizeId] = Math.round(width);
-  try {
-    localStorage.setItem(RESIZABLE_SPLIT_STORAGE_KEY, JSON.stringify(state));
-  } catch (_error) {
-    // Resizable layout persistence is best-effort.
+  state[resizeId] = value;
+  saveResizableLayoutState(localStorage, RESIZABLE_SPLIT_STORAGE_KEY, state);
+}
+
+function saveResizableSplitWidth(split, handle, width) {
+  const resizeId = split.dataset.resizeId || "";
+  if (!resizeId) {
+    return;
   }
+  const variableName = getResizableSplitVariableName(split, handle);
+  const current = loadResizableSplitState()[resizeId];
+  const handleCount = split.querySelectorAll("[data-resize-handle]").length;
+  saveResizableSplitValue(resizeId, buildResizableStoredValue(current, variableName, width, handleCount));
+}
+
+function resetResizableLayout(panel) {
+  removeResizableLayoutState(localStorage, RESIZABLE_SPLIT_STORAGE_KEY);
+  for (const split of document.querySelectorAll("[data-resize-id]")) {
+    split.style.removeProperty("--split-left");
+    split.style.removeProperty("--split-middle");
+    split.style.removeProperty("--split-right");
+    split.style.removeProperty("--split-top");
+    split.style.removeProperty("--split-bottom");
+  }
+  setStatus(panel, "分栏布局已重置。");
+}
+
+function applyTwoPaneLayoutPreset(panel, resizeId, preset, title) {
+  const split = document.querySelector(`[data-resize-id="${resizeId}"]`);
+  if (!split) {
+    setStatus(panel, `${title}布局区域尚未加载。`);
+    return;
+  }
+  const width = getTwoPanePresetLeftWidth(split, preset);
+  split.style.setProperty("--split-left", `${width}px`);
+  saveResizableSplitValue(resizeId, Math.round(width));
+  setStatus(panel, `${title}布局已切换为${formatTwoPanePresetName(preset)}。`);
+}
+
+function applyPackageSizeLayoutPreset(panel, preset) {
+  const grid = document.querySelector('[data-resize-id="package-size"]');
+  const container = document.querySelector('[data-resize-id="package-size-panel"]');
+  if (!grid || !container) {
+    setStatus(panel, "包体统计布局区域尚未加载。");
+    return;
+  }
+
+  const columns = getPackageSizePresetColumns(grid, preset);
+  const top = getPackageSizePresetTopHeight(preset);
+  grid.style.setProperty("--split-left", `${columns.left}px`);
+  grid.style.setProperty("--split-middle", `${columns.middle}px`);
+  container.style.setProperty("--split-top", `${top}px`);
+  saveResizableSplitValue("package-size", { columns });
+  saveResizableSplitValue("package-size-panel", { columns: { top } });
+  setStatus(panel, `包体统计布局已切换为${formatPackageSizePresetName(preset)}。`);
 }
 
 function startResizableSplitDrag(split, handle, event, mode) {
@@ -1013,32 +1410,30 @@ function startResizableSplitDrag(split, handle, event, mode) {
     return;
   }
   event.preventDefault();
+  const previousPane = handle.previousElementSibling;
+  if (!previousPane) {
+    return;
+  }
   handle.classList.add("dragging");
-  document.body?.classList.add("resizing-split");
-  const resizeId = split.dataset.resizeId || "";
+  const axis = getResizableSplitAxis(handle);
+  document.body?.classList.add(axis === "y" ? "resizing-split-y" : "resizing-split");
 
   const move = (moveEvent) => {
     moveEvent.preventDefault?.();
-    const clientX = getResizeClientX(moveEvent);
-    if (!Number.isFinite(clientX)) {
-      return;
+    const size = getResizableSplitSize(split, handle, previousPane, moveEvent);
+    if (Number.isFinite(size)) {
+      split.style.setProperty(`--split-${getResizableSplitVariableName(split, handle)}`, `${size}px`);
     }
-    const splitRect = split.getBoundingClientRect();
-    const availableWidth = split.clientWidth;
-    const maxLeft = Math.max(RESIZABLE_SPLIT_MIN_LEFT, availableWidth - RESIZABLE_SPLIT_MIN_RIGHT);
-    const left = Math.min(
-      Math.max(RESIZABLE_SPLIT_MIN_LEFT, clientX - splitRect.left),
-      maxLeft
-    );
-    split.style.setProperty("--split-left", `${left}px`);
   };
   const up = () => {
-    const current = parseFloat(split.style.getPropertyValue("--split-left"));
+    const variableName = getResizableSplitVariableName(split, handle);
+    const current = parseFloat(split.style.getPropertyValue(`--split-${variableName}`));
     if (Number.isFinite(current)) {
-      saveResizableSplitWidth(resizeId, current);
+      saveResizableSplitWidth(split, handle, current);
     }
     handle.classList.remove("dragging");
     document.body?.classList.remove("resizing-split");
+    document.body?.classList.remove("resizing-split-y");
     removeResizableSplitDragListeners(mode, move, up);
   };
 
@@ -1046,9 +1441,28 @@ function startResizableSplitDrag(split, handle, event, mode) {
   move(event);
 }
 
-function getResizeClientX(event) {
-  const touch = event.touches?.[0] || event.changedTouches?.[0];
-  return touch ? touch.clientX : event.clientX;
+function getResizableSplitSize(split, handle, previousPane, event) {
+  const axis = getResizableSplitAxis(handle);
+  return clampResizableSplitSize({
+    axis,
+    clientPosition: getResizeClientPosition(event, axis),
+    paneRect: previousPane.getBoundingClientRect(),
+    nextPaneRect: handle.nextElementSibling?.getBoundingClientRect(),
+    splitRect: split.getBoundingClientRect(),
+    minLeft: RESIZABLE_SPLIT_MIN_LEFT,
+    minRight: RESIZABLE_SPLIT_MIN_RIGHT,
+    minTop: RESIZABLE_SPLIT_MIN_TOP,
+    minBottom: RESIZABLE_SPLIT_MIN_BOTTOM,
+  });
+}
+
+function getResizableSplitAxis(handle) {
+  return getResizableSplitAxisFromDataset(handle.dataset);
+}
+
+function getResizableSplitVariableName(split, handle) {
+  const handleIndex = [...split.querySelectorAll("[data-resize-handle]")].indexOf(handle);
+  return getResizableSplitVariableNameFromIndex(handle.dataset, handleIndex);
 }
 
 function addResizableSplitDragListeners(mode, move, up) {
@@ -1079,12 +1493,13 @@ async function loadState(panel) {
     rules = state.rules || [];
     history = state.history || [];
     toolVisibility = normalizeToolVisibility(state.toolVisibility);
-    selectedHistoryDetail = null;
+    ({ selectedHistoryDetail } = buildHistoryDetailResultState());
     renderToolPanel(panel);
     applyToolVisibility(panel);
     renderRules(panel);
     renderHistory(panel);
     renderHistoryDetail(panel);
+    renderOverview(panel);
   } catch (error) {
     setStatus(panel, `读取规则和历史失败：${error.message}`);
   }
@@ -1093,7 +1508,7 @@ async function loadState(panel) {
 async function loadLogs(panel) {
   try {
     const result = await requestMain("get-logs");
-    runtimeLogs = result.logs || [];
+    ({ runtimeLogs } = buildRuntimeLogsResultState(result));
     renderLogs(panel);
   } catch (error) {
     runtimeLogs = [{
@@ -1114,7 +1529,7 @@ async function exportSessionReport(panel) {
     const result = await requestMain("export-session-report", {
       snapshot
     });
-    panel.$.exportSessionReportSummary.textContent = `已导出 ${safeNumber(result.moduleCount)} 个已运行模块：${result.markdownPath}、${result.jsonPath}`;
+    panel.$.exportSessionReportSummary.textContent = formatExportSessionReportSummary(result);
     await addLog(panel, "info", `会话报告已导出：${result.markdownPath}、${result.jsonPath}`);
     setStatus(panel, `会话报告已导出到 ${result.reportDirectory}`);
   } catch (error) {
@@ -1126,104 +1541,51 @@ async function exportSessionReport(panel) {
 }
 
 function buildSessionReportSnapshot() {
-  const modules = [];
-  addSessionReportModule(modules, "asset-scan", "资源扫描", scanReportSummary, {
-    resources: scanResourceEntries,
-    issues: scanIssues,
-    typeStats: scanTypeStats
+  return buildSessionReportSnapshotFromState({
+    scanReportSummary,
+    scanResourceEntries,
+    scanIssues,
+    scanTypeStats,
+    referenceSummary,
+    referenceTargets,
+    referenceRows,
+    nodeReferenceSummary,
+    nodeReferenceTargets,
+    nodeReferenceRows,
+    unusedSummary,
+    unusedCandidates,
+    resourcesRuntimeSummary,
+    resourcesRuntimeResources,
+    resourcesRuntimeStaticCalls,
+    resourcesRuntimeUnused,
+    resourcesRuntimeDynamicCalls,
+    packageSizeSummary,
+    packageDirectoryRanking,
+    packageTypeRanking,
+    packageTopFiles,
+    packageReferencedTopFiles,
+    directoryConventionSummary,
+    directoryConventionMismatches,
+    materialTextureSummary,
+    materialTextureReferences,
+    duplicateAssetSummary,
+    duplicateSameNameGroups,
+    duplicateHashGroups,
+    scenePrefabReferenceSummary,
+    scenePrefabReferenceIssues,
+    currentPlan,
+    history,
+    runtimeLogs
+  }, {
+    isToolEnabled,
+    summarizeHistory: toHistorySummary
   });
-  addSessionReportModule(modules, "reference-check", "资源引用检查", referenceSummary, {
-    targets: referenceTargets,
-    references: referenceRows
-  });
-  if (isToolEnabled("scene-node-reference-check")) {
-    addSessionReportModule(modules, "scene-node-reference-check", "场景节点引用检查", nodeReferenceSummary, {
-      targets: nodeReferenceTargets,
-      references: nodeReferenceRows
-    });
-  }
-  addSessionReportModule(modules, "scene-unused-assets", "未引用资源扫描", unusedSummary, {
-    candidates: unusedCandidates
-  });
-  if (isToolEnabled("resources-runtime-check")) {
-    addSessionReportModule(modules, "resources-runtime-check", "resources 动态加载检查", resourcesRuntimeSummary, {
-      resources: resourcesRuntimeResources,
-      staticCalls: resourcesRuntimeStaticCalls,
-      unusedResources: resourcesRuntimeUnused,
-      dynamicCalls: resourcesRuntimeDynamicCalls
-    });
-  }
-  if (isToolEnabled("package-size-report")) {
-    addSessionReportModule(modules, "package-size-report", "包体贡献统计", packageSizeSummary, {
-      directoryRanking: packageDirectoryRanking,
-      typeRanking: packageTypeRanking,
-      topFiles: packageTopFiles,
-      referencedTopFiles: packageReferencedTopFiles
-    });
-  }
-  if (isToolEnabled("directory-convention")) {
-    addSessionReportModule(modules, "directory-convention", "目录规范检查", directoryConventionSummary, {
-      mismatches: directoryConventionMismatches
-    });
-  }
-  if (isToolEnabled("material-textures")) {
-    addSessionReportModule(modules, "material-textures", "材质贴图检查", materialTextureSummary, {
-      references: materialTextureReferences
-    });
-  }
-  if (isToolEnabled("duplicate-assets")) {
-    addSessionReportModule(modules, "duplicate-assets", "重复资源检查", duplicateAssetSummary, {
-      sameNameGroups: duplicateSameNameGroups,
-      duplicateHashGroups
-    });
-  }
-  if (isToolEnabled("scene-prefab-reference-health")) {
-    addSessionReportModule(modules, "scene-prefab-reference-health", "场景和 Prefab 引用健康", scenePrefabReferenceSummary, {
-      issues: scenePrefabReferenceIssues
-    });
-  }
-  return {
-    modules,
-    currentPlan: sanitizeCurrentPlanForReport(currentPlan),
-    history: history.map(toHistorySummary),
-    logs: runtimeLogs
-  };
-}
-
-function addSessionReportModule(modules, id, title, summary, data) {
-  if (!summary) {
-    return;
-  }
-  modules.push({ id, title, summary, data });
-}
-
-function sanitizeCurrentPlanForReport(plan) {
-  if (!plan) {
-    return null;
-  }
-  const { token, ...reportPlan } = plan;
-  return reportPlan;
-}
-
-function toHistorySummary(item) {
-  return {
-    id: item.id,
-    createdAt: item.createdAt,
-    kind: item.kind,
-    mode: item.mode,
-    conflictPolicy: item.conflictPolicy,
-    movedCount: item.movedCount,
-    failedCount: item.failedCount,
-    hasOverwrite: item.hasOverwrite,
-    deletedDirectoryCount: Array.isArray(item.deletedDirectories) ? item.deletedDirectories.length : 0,
-    cleanupFailedCount: item.cleanupFailedCount
-  };
 }
 
 async function loadHistoryDetail(panel) {
   const historyId = panel.$.historySelect.value;
   if (!historyId) {
-    selectedHistoryDetail = null;
+    ({ selectedHistoryDetail } = buildHistoryDetailResultState());
     renderHistoryDetail(panel);
     setStatus(panel, "没有可查看的移动历史。");
     return;
@@ -1232,11 +1594,11 @@ async function loadHistoryDetail(panel) {
   setStatus(panel, "正在读取移动历史详情...");
   try {
     const result = await requestMain("get-history-detail", { historyId });
-    selectedHistoryDetail = result.detail || null;
+    ({ selectedHistoryDetail } = buildHistoryDetailResultState(result));
     renderHistoryDetail(panel);
     setStatus(panel, selectedHistoryDetail?.warning || "移动历史详情已加载。");
   } catch (error) {
-    selectedHistoryDetail = null;
+    ({ selectedHistoryDetail } = buildHistoryDetailResultState());
     renderHistoryDetail(panel);
     setStatus(panel, `读取移动历史详情失败：${error.message}`);
   } finally {
@@ -1245,33 +1607,7 @@ async function loadHistoryDetail(panel) {
 }
 
 function renderHistoryDetail(panel) {
-  panel.$.historyDetailRows.innerHTML = "";
-  const detail = selectedHistoryDetail;
-  const moves = detail?.moves || [];
-  panel.$.historyDetailEmpty.style.display = moves.length ? "none" : "block";
-  if (!detail) {
-    panel.$.historyDetailSummary.textContent = "选择一条移动历史后查看完整已移动项和清理结果。";
-    panel.$.historyCleanupSummary.textContent = "暂无清理结果。";
-    return;
-  }
-  const failedMoveHint = detail.failedMovesPersisted
-    ? `失败明细 ${safeNumber(detail.failedMoves?.length)} 项已持久化。`
-    : "失败明细未持久化，请查看当次执行日志。";
-  const cleanupFailedHint = detail.failedDirectoriesPersisted
-    ? `清理失败明细 ${safeNumber(detail.failedDirectories?.length)} 项已持久化。`
-    : "失败明细未持久化。";
-  panel.$.historyDetailSummary.textContent = `${formatDate(detail.createdAt)}：${detail.kind === "reverse" ? "反向" : "移动"} / ${detail.mode || "-"} / ${detail.conflictPolicy || "-"}；成功 ${safeNumber(detail.movedCount)} 项，失败 ${safeNumber(detail.failedCount)} 项，含覆盖 ${detail.hasOverwrite ? "是" : "否"}。${failedMoveHint}`;
-  panel.$.historyCleanupSummary.textContent = `删除空源目录 ${safeNumber(detail.deletedDirectories?.length)} 个：${formatPathList(detail.deletedDirectories)}；清理失败 ${safeNumber(detail.cleanupFailedCount)} 个（${cleanupFailedHint}）。`;
-  for (const move of moves) {
-    const row = document.createElement("tr");
-    row.innerHTML = `
-      <td>${formatAction(move.action)}</td>
-      <td class="path" title="${escapeHtml(move.source)}">${escapeHtml(move.source)}</td>
-      <td class="path" title="${escapeHtml(move.destination)}">${escapeHtml(move.destination)}</td>
-      <td class="${move.overwrittenTargetRecoverable ? "ready" : "warning"}">${move.overwrittenTargetRecoverable ? "是" : "否"}</td>
-    `;
-    panel.$.historyDetailRows.appendChild(row);
-  }
+  renderHistoryDetailView(panel, selectedHistoryDetail, { document, formatDate });
 }
 
 async function addLog(panel, level, message, detail = "") {
@@ -1287,7 +1623,7 @@ async function addLog(panel, level, message, detail = "") {
 
   try {
     const result = await requestMain("append-log", log);
-    runtimeLogs = result.logs || runtimeLogs;
+    ({ runtimeLogs } = buildRuntimeLogsResultState(result, runtimeLogs));
     renderLogs(panel);
   } catch (error) {
     runtimeLogs.push({
@@ -1304,7 +1640,7 @@ async function addLog(panel, level, message, detail = "") {
 async function clearLogs(panel) {
   try {
     const result = await requestMain("clear-logs");
-    runtimeLogs = result.logs || [];
+    ({ runtimeLogs } = buildRuntimeLogsResultState(result));
     renderLogs(panel);
     setStatus(panel, "运行日志已清空。");
   } catch (error) {
@@ -1312,18 +1648,47 @@ async function clearLogs(panel) {
   }
 }
 
-function renderLogs(panel) {
-  panel.$.logRows.innerHTML = "";
-  panel.$.logEmpty.style.display = runtimeLogs.length ? "none" : "block";
-  for (const log of [...runtimeLogs].slice().reverse()) {
-    const row = document.createElement("tr");
-    row.innerHTML = `
-      <td>${escapeHtml(formatDate(log.time))}</td>
-      <td class="${formatLogLevelClass(log.level)}">${escapeHtml(formatLogLevel(log.level))}</td>
-      <td title="${escapeHtml(log.detail || "")}">${escapeHtml(log.message || "")}</td>
-    `;
-    panel.$.logRows.appendChild(row);
+async function cleanProjectCache(panel) {
+  const reloadStrategy = panel.$.projectCacheReloadStrategySelect.value;
+  const reloadText = reloadStrategy === "editor-reload"
+    ? "执行编辑器级项目重载/重启；如果当前 Creator API 不支持，将返回错误"
+    : "刷新 AssetDB，并在必要时手动重新打开项目";
+  if (!window.confirm(`即将删除项目根目录下的 library 和 temp 缓存目录，并${reloadText}。\n\n该操作不可撤销，建议先关闭预览、构建和正在运行的任务。\n\n继续执行？`)) {
+    return;
   }
+
+  setBusy(panel, true);
+  setStatus(panel, "正在清理 library/temp...");
+  try {
+    const result = await requestMain("clean-project-cache", {
+      directories: ["library", "temp"],
+      confirmed: true,
+      reloadStrategy
+    });
+    const summary = result.summary || {};
+    const refreshHint = result.refresh?.manualHint || "请根据 Creator 状态手动重新打开项目。";
+    const message = `缓存清理完成：删除 ${safeNumber(summary.deleted)} 个目录，跳过 ${safeNumber(summary.skipped)} 个，失败 ${safeNumber(summary.failed)} 个；释放约 ${formatSize(summary.deletedSize || 0)}。${refreshHint}`;
+    panel.$.projectCacheCleanSummary.textContent = message;
+    await addLog(panel, summary.failed ? "warning" : "info", message, JSON.stringify({
+      deleted: result.deleted,
+      skipped: result.skipped,
+      failed: result.failed,
+      refresh: result.refresh
+    }, null, 2));
+    setStatus(panel, message);
+  } catch (error) {
+    const message = `缓存清理失败：${error.message}`;
+    await addLog(panel, "error", message);
+    panel.$.projectCacheCleanSummary.textContent = message;
+    setStatus(panel, message);
+  } finally {
+    setBusy(panel, false);
+  }
+}
+
+function renderLogs(panel) {
+  renderLogsView(panel, runtimeLogs, { document, formatDate });
+  renderOverview(panel);
 }
 
 async function scanAssetReport(panel) {
@@ -1336,17 +1701,21 @@ async function scanAssetReport(panel) {
       directory: panel.$.assetScanDirectoryInput.value,
       issueIgnorePatterns: panel.$.assetScanIssueIgnoreInput.value
     });
-    scanResourceEntries = result.entries || [];
-    scanIssues = result.issues || [];
-    scanTypeStats = result.typeStats || [];
-    scanReportSummary = result.summary || null;
+    ({
+      scanResourceEntries,
+      scanIssues,
+      scanTypeStats,
+      scanReportSummary
+    } = buildAssetScanResultState(result));
     if (!isCompleteAssetScanResult(result)) {
       const message = "资源扫描接口返回旧结构或字段不完整。请在扩展管理器重载 asset-steward 后重新打开面板。";
       await addLog(panel, "warning", message, JSON.stringify(result?.summary || {}, null, 2));
-      scanResourceEntries = [];
-      scanIssues = [];
-      scanTypeStats = [];
-      scanReportSummary = null;
+      ({
+        scanResourceEntries,
+        scanIssues,
+        scanTypeStats,
+        scanReportSummary
+      } = buildAssetScanResultState());
       renderAssetScanReport(panel);
       setStatus(panel, message);
       return;
@@ -1361,10 +1730,12 @@ async function scanAssetReport(panel) {
       ? "扫描完成。请优先复核缺失 meta；本页不会直接修复或删除资源。"
       : "扫描完成，当前范围未发现 meta 异常或空目录。");
   } catch (error) {
-    scanResourceEntries = [];
-    scanIssues = [];
-    scanTypeStats = [];
-    scanReportSummary = null;
+    ({
+      scanResourceEntries,
+      scanIssues,
+      scanTypeStats,
+      scanReportSummary
+    } = buildAssetScanResultState());
     renderAssetScanReport(panel);
     await addLog(panel, "error", `资源扫描失败：${error.message}`);
     setStatus(panel, `资源扫描失败：${error.message}`);
@@ -1374,79 +1745,17 @@ async function scanAssetReport(panel) {
 }
 
 function renderAssetScanReport(panel) {
-  renderAssetScanSummary(panel);
-  renderAssetScanResources(panel);
-  renderAssetScanIssues(panel);
-  renderAssetScanTypes(panel);
-}
-
-function renderAssetScanSummary(panel) {
-  if (!scanReportSummary) {
-    panel.$.assetScanSummary.textContent = "尚未扫描。第一版只预览异常和统计，不删除、不修复、不创建目录。";
-    return;
-  }
-
-  const summary = scanReportSummary;
-  const ignoredText = summary.ignoredIssueCount ? `，已忽略异常 ${safeNumber(summary.ignoredIssueCount)} 项` : "";
-  panel.$.assetScanSummary.textContent = `扫描 ${summary.scanDirectory || "assets"}：文件 ${safeNumber(summary.fileCount)} 项，目录 ${safeNumber(summary.directoryCount)} 项，总大小 ${formatSize(summary.totalSize || 0)}；缺失 meta ${safeNumber(summary.missingMetaCount)} 项，孤立 meta ${safeNumber(summary.orphanMetaCount)} 项，空目录 ${safeNumber(summary.emptyDirectoryCount)} 项${ignoredText}；当前筛选显示异常 ${safeNumber(summary.visibleIssueCount)} 项，类型 ${safeNumber(summary.typeCount)} 类。`;
-}
-
-function renderAssetScanResources(panel) {
-  panel.$.assetScanResourceRows.innerHTML = "";
-  panel.$.assetScanResourceEmpty.style.display = scanResourceEntries.length ? "none" : "block";
-  for (const entry of scanResourceEntries) {
-    const canCheckReference = entry.selectable && !entry.missingMeta;
-    const statusText = entry.issueIgnored ? "已忽略" : entry.missingMeta ? "缺少 meta" : "正常";
-    const statusClass = entry.issueIgnored ? "ready" : entry.missingMeta ? "warning" : "";
-    const row = document.createElement("tr");
-    row.innerHTML = `
-      <td class="path" title="${escapeHtml(entry.path)}">${escapeHtml(entry.path)}</td>
-      <td>${escapeHtml(entry.extension || "-")}</td>
-      <td>${entry.kind === "directory" ? "-" : formatSize(entry.size || 0)}</td>
-      <td class="${statusClass}">${statusText}</td>
-      <td><button class="locate">定位</button><button class="check-reference" ${canCheckReference ? "" : "disabled"}>查引用</button></td>
-    `;
-    row.querySelector(".locate").addEventListener("click", () => locate(panel, entry.path));
-    if (canCheckReference) {
-      row.querySelector(".check-reference").addEventListener("click", () => checkReferenceForPath(panel, entry.path));
-    }
-    panel.$.assetScanResourceRows.appendChild(row);
-  }
-}
-
-function renderAssetScanIssues(panel) {
-  panel.$.assetScanIssueRows.innerHTML = "";
-  panel.$.assetScanIssueEmpty.style.display = scanIssues.length ? "none" : "block";
-  for (const issue of scanIssues) {
-    const row = document.createElement("tr");
-    row.innerHTML = `
-      <td class="${formatIssueSeverityClass(issue.severity)}">${formatIssueSeverity(issue.severity)}</td>
-      <td>${formatIssueKind(issue.kind)}</td>
-      <td class="path" title="${escapeHtml(issue.path)}">${escapeHtml(issue.path)}</td>
-      <td>${escapeHtml(issue.extension || "-")}</td>
-      <td>${issue.size > 0 ? formatSize(issue.size) : "-"}</td>
-      <td><button class="locate" ${issue.locatable ? "" : "disabled"}>${issue.locatable ? "定位" : "仅显示"}</button></td>
-    `;
-    const locateButton = row.querySelector(".locate");
-    if (issue.locatable) {
-      locateButton.addEventListener("click", () => locate(panel, issue.path));
-    }
-    panel.$.assetScanIssueRows.appendChild(row);
-  }
-}
-
-function renderAssetScanTypes(panel) {
-  panel.$.assetScanTypeRows.innerHTML = "";
-  panel.$.assetScanTypeEmpty.style.display = scanTypeStats.length ? "none" : "block";
-  for (const stat of scanTypeStats) {
-    const row = document.createElement("tr");
-    row.innerHTML = `
-      <td>${escapeHtml(stat.extension)}</td>
-      <td>${stat.count}</td>
-      <td>${formatSize(stat.totalSize)}</td>
-    `;
-    panel.$.assetScanTypeRows.appendChild(row);
-  }
+  renderAssetScanReportView(panel, {
+    scanResourceEntries,
+    scanIssues,
+    scanTypeStats,
+    scanReportSummary
+  }, {
+    document,
+    locate: (path) => locate(panel, path),
+    checkReferenceForPath: (path) => checkReferenceForPath(panel, path)
+  });
+  renderOverview(panel);
 }
 
 async function checkReferences(panel) {
@@ -1458,15 +1767,19 @@ async function checkReferences(panel) {
       directory: panel.$.referenceDirectoryInput.value,
       extensions: panel.$.referenceExtensionInput.value
     });
-    referenceTargets = result.targets || [];
-    referenceRows = result.references || [];
-    referenceSummary = result.summary || null;
+    ({
+      referenceTargets,
+      referenceRows,
+      referenceSummary
+    } = buildReferenceResultState(result));
     if (!isCompleteReferenceResult(result)) {
       const message = "引用检查接口返回旧结构或字段不完整。请重载 asset-steward 后重新检查。";
       await addLog(panel, "warning", message, JSON.stringify(result?.summary || {}, null, 2));
-      referenceTargets = [];
-      referenceRows = [];
-      referenceSummary = null;
+      ({
+        referenceTargets,
+        referenceRows,
+        referenceSummary
+      } = buildReferenceResultState());
       renderReferences(panel);
       setStatus(panel, message);
       return;
@@ -1477,9 +1790,11 @@ async function checkReferences(panel) {
     }
     setStatus(panel, result.warning || "引用检查完成。");
   } catch (error) {
-    referenceTargets = [];
-    referenceRows = [];
-    referenceSummary = null;
+    ({
+      referenceTargets,
+      referenceRows,
+      referenceSummary
+    } = buildReferenceResultState());
     renderReferences(panel);
     await addLog(panel, "error", `引用检查失败：${error.message}`);
     setStatus(panel, `引用检查失败：${error.message}`);
@@ -1516,65 +1831,17 @@ async function checkReferenceForSelectedAsset(panel) {
 }
 
 function renderReferences(panel) {
-  renderReferenceSummary(panel);
-  renderReferenceTargets(panel);
-  renderReferenceRows(panel);
-}
-
-function renderReferenceSummary(panel) {
-  if (!referenceSummary) {
-    panel.$.referenceSummary.textContent = "静态搜索目标资源 UUID。未找到引用不等于可删除，还需要人工复核动态加载。";
-    return;
-  }
-
-  panel.$.referenceSummary.textContent = `扫描 ${referenceSummary.scanDirectory || "assets"}：目标 ${safeNumber(referenceSummary.targetCount)} 项，UUID ${safeNumber(referenceSummary.uuidCount)} 个，扫描序列化文件 ${safeNumber(referenceSummary.scannedFileCount)} 个，找到引用方 ${safeNumber(referenceSummary.referenceFileCount)} 个，命中 ${safeNumber(referenceSummary.totalMatchCount)} 次，解析位置 ${safeNumber(referenceSummary.referencePositionCount)} 条，可选中节点 ${safeNumber(referenceSummary.selectablePositionCount)} 条。`;
-}
-
-function renderReferenceTargets(panel) {
-  panel.$.referenceTargetRows.innerHTML = "";
-  panel.$.referenceTargetEmpty.style.display = referenceTargets.length ? "none" : "block";
-  for (const target of referenceTargets) {
-    const row = document.createElement("tr");
-    row.innerHTML = `
-      <td class="path" title="${escapeHtml(target.path)}">${escapeHtml(target.path)}</td>
-      <td>${target.uuidCount}</td>
-      <td class="path" title="${escapeHtml((target.uuids || []).join(", "))}">${escapeHtml(formatUuidList(target.uuids))}</td>
-      <td><button class="locate">定位</button></td>
-    `;
-    row.querySelector(".locate").addEventListener("click", () => locate(panel, target.path));
-    panel.$.referenceTargetRows.appendChild(row);
-  }
-}
-
-function renderReferenceRows(panel) {
-  panel.$.referenceRows.innerHTML = "";
-  panel.$.referenceEmpty.style.display = referenceRows.length ? "none" : "block";
-  for (const item of referenceRows) {
-    const details = item.details?.length ? item.details : [null];
-    for (const detail of details) {
-      renderReferenceRow(panel, item, detail);
-    }
-  }
-}
-
-function renderReferenceRow(panel, item, detail) {
-    const row = document.createElement("tr");
-    const position = detail
-      ? `${detail.nodePath || "未解析节点"} | ${detail.componentType || "未知组件"} | ${detail.fieldPath || "未知字段"}`
-      : `仅文件级结果，共命中 ${item.matchCount} 次`;
-    const matchedUuid = detail?.matchedUuid || formatUuidList(item.matchedUuids);
-    const targetPaths = detail?.targetPaths || item.targetPaths;
-    row.innerHTML = `
-      <td class="path" title="${escapeHtml(item.path)}">${escapeHtml(item.path)}</td>
-      <td class="path" title="${escapeHtml(position)}">${escapeHtml(position)}</td>
-      <td class="path" title="${escapeHtml(matchedUuid)}">${escapeHtml(matchedUuid)}</td>
-      <td class="path" title="${escapeHtml((targetPaths || []).join(", "))}">${escapeHtml(formatPathList(targetPaths))}</td>
-      <td><button class="locate">定位资源</button> <button class="check-parent">查上级</button> <button class="select-node" ${detail?.selectable ? "" : "disabled"}>选中节点</button></td>
-    `;
-    row.querySelector(".locate").addEventListener("click", () => locate(panel, item.path));
-    row.querySelector(".check-parent").addEventListener("click", () => checkReferenceForPath(panel, item.path));
-    row.querySelector(".select-node").addEventListener("click", () => selectReferenceNode(panel, item.path, detail));
-    panel.$.referenceRows.appendChild(row);
+  renderReferencesView(panel, {
+    referenceTargets,
+    referenceRows,
+    referenceSummary
+  }, {
+    document,
+    locate: (path) => locate(panel, path),
+    checkParent: (path) => checkReferenceForPath(panel, path),
+    selectNode: (path, detail) => selectReferenceNode(panel, path, detail)
+  });
+  renderOverview(panel);
 }
 
 async function selectReferenceNode(panel, path, detail) {
@@ -1603,9 +1870,11 @@ async function checkNodeReferences(panel) {
       directory: panel.$.nodeReferenceDirectoryInput.value,
       extensions: panel.$.nodeReferenceExtensionInput.value
     });
-    nodeReferenceTargets = result.targetNodes || [];
-    nodeReferenceRows = result.references || [];
-    nodeReferenceSummary = result.summary || null;
+    ({
+      nodeReferenceTargets,
+      nodeReferenceRows,
+      nodeReferenceSummary
+    } = buildNodeReferenceResultState(result));
     if (result.nodeUuid && !panel.$.nodeReferenceUuidInput.value.trim()) {
       panel.$.nodeReferenceUuidInput.value = result.nodeUuid;
     }
@@ -1631,76 +1900,24 @@ async function checkNodeReferences(panel) {
 }
 
 function resetNodeReferenceResult() {
-  nodeReferenceTargets = [];
-  nodeReferenceRows = [];
-  nodeReferenceSummary = null;
+  ({
+    nodeReferenceTargets,
+    nodeReferenceRows,
+    nodeReferenceSummary
+  } = buildNodeReferenceResultState());
 }
 
 function renderNodeReferences(panel) {
-  renderNodeReferenceSummary(panel);
-  renderNodeReferenceTargets(panel);
-  renderNodeReferenceRows(panel);
-}
-
-function renderNodeReferenceSummary(panel) {
-  if (!nodeReferenceSummary) {
-    panel.$.nodeReferenceSummary.textContent = "根据目标节点 ID 反查哪些组件属性引用了它；只报告，不修改场景。";
-    return;
-  }
-
-  const summary = nodeReferenceSummary;
-  panel.$.nodeReferenceSummary.textContent = `扫描 ${summary.scanDirectory || "assets"}：序列化文件 ${safeNumber(summary.scannedFileCount)} 个，匹配目标节点 ${safeNumber(summary.targetNodeCount)} 个/文件 ${safeNumber(summary.targetFileCount)} 个，找到引用文件 ${safeNumber(summary.referenceFileCount)} 个，引用组件 ${safeNumber(summary.referencePositionCount)} 条，可选中节点 ${safeNumber(summary.selectablePositionCount)} 条。`;
-}
-
-function renderNodeReferenceTargets(panel) {
-  panel.$.nodeReferenceTargetRows.innerHTML = "";
-  panel.$.nodeReferenceTargetEmpty.style.display = nodeReferenceTargets.length ? "none" : "block";
-  for (const item of nodeReferenceTargets) {
-    const row = document.createElement("tr");
-    row.innerHTML = `
-      <td class="path" title="${escapeHtml(item.filePath)}">${escapeHtml(item.filePath)}</td>
-      <td class="path" title="${escapeHtml(item.nodePath)}">${escapeHtml(item.nodePath || item.nodeName || "-")}</td>
-      <td class="path" title="${escapeHtml(item.nodeUuid)}">${escapeHtml(item.nodeUuid)}</td>
-      <td><button class="locate">定位资源</button> <button class="select-node" ${item.selectable ? "" : "disabled"}>选中节点</button></td>
-    `;
-    row.querySelector(".locate").addEventListener("click", () => locate(panel, item.filePath));
-    row.querySelector(".select-node").addEventListener("click", () => selectReferenceNode(panel, item.filePath, item));
-    panel.$.nodeReferenceTargetRows.appendChild(row);
-  }
-}
-
-function renderNodeReferenceRows(panel) {
-  panel.$.nodeReferenceRows.innerHTML = "";
-  panel.$.nodeReferenceEmpty.style.display = nodeReferenceRows.length ? "none" : "block";
-  for (const item of nodeReferenceRows) {
-    const details = item.references?.length ? item.references : [null];
-    for (const detail of details) {
-      renderNodeReferenceRow(panel, item, detail);
-    }
-  }
-}
-
-function renderNodeReferenceRow(panel, item, detail) {
-  if (!detail) {
-    return;
-  }
-  const row = document.createElement("tr");
-  row.innerHTML = `
-    <td class="path" title="${escapeHtml(item.path)}">${escapeHtml(item.path)}</td>
-    <td class="path" title="${escapeHtml(detail.nodePath)}">${escapeHtml(detail.nodePath || "未解析节点")}</td>
-    <td class="path" title="${escapeHtml(detail.componentType)}">${escapeHtml(detail.componentType || "未知组件")}</td>
-    <td class="path" title="${escapeHtml(detail.fieldPath)}">${escapeHtml(detail.fieldPath || "未知字段")}</td>
-    <td class="path" title="${escapeHtml(detail.targetNodePath)}">${escapeHtml(detail.targetNodePath || detail.targetNodeName || "-")}</td>
-    <td><button class="locate">定位资源</button> <button class="select-node" ${detail.selectable ? "" : "disabled"}>选中引用节点</button> <button class="select-target" ${detail.targetNodeUuid ? "" : "disabled"}>选中目标</button></td>
-  `;
-  row.querySelector(".locate").addEventListener("click", () => locate(panel, item.path));
-  row.querySelector(".select-node").addEventListener("click", () => selectReferenceNode(panel, item.path, detail));
-  row.querySelector(".select-target").addEventListener("click", () => selectReferenceNode(panel, item.path, {
-    selectable: Boolean(detail.targetNodeUuid),
-    nodeUuid: detail.targetNodeUuid,
-    nodePath: detail.targetNodePath
-  }));
-  panel.$.nodeReferenceRows.appendChild(row);
+  renderNodeReferencesView(panel, {
+    nodeReferenceTargets,
+    nodeReferenceRows,
+    nodeReferenceSummary
+  }, {
+    document,
+    locate: (path) => locate(panel, path),
+    selectNode: (path, detail) => selectReferenceNode(panel, path, detail)
+  });
+  renderOverview(panel);
 }
 
 async function scanUnusedAssets(panel) {
@@ -1711,8 +1928,10 @@ async function scanUnusedAssets(panel) {
       scene: panel.$.unusedSceneInput.value,
       directory: panel.$.unusedDirectoryInput.value
     });
-    unusedCandidates = result.candidates || [];
-    unusedSummary = result.summary || null;
+    ({
+      unusedCandidates,
+      unusedSummary
+    } = buildUnusedScanResultState(result));
     unusedSelectedPaths = new Set();
     unusedDeletePlan = null;
     if (!isCompleteUnusedResult(result)) {
@@ -1737,21 +1956,20 @@ async function scanUnusedAssets(panel) {
 }
 
 function resetUnusedResult() {
-  unusedCandidates = [];
-  unusedSummary = null;
+  ({
+    unusedCandidates,
+    unusedSummary
+  } = buildUnusedScanResultState());
   unusedSelectedPaths = new Set();
   unusedDeletePlan = null;
 }
 
 function getVisibleUnusedCandidates(panel) {
-  const search = String(panel.$.unusedSearchInput.value || "").trim().toLowerCase();
-  const extensions = normalizePanelExtensions(panel.$.unusedExtensionInput.value);
-  return unusedCandidates.filter((item) => {
-    if (search && !String(item.path).toLowerCase().includes(search)) {
-      return false;
-    }
-    return extensions.length === 0 || extensions.includes(String(item.extension).toLowerCase());
-  });
+  return filterUnusedCandidates(
+    unusedCandidates,
+    panel.$.unusedSearchInput.value,
+    panel.$.unusedExtensionInput.value
+  );
 }
 
 function selectVisibleUnusedCandidates(panel) {
@@ -1774,39 +1992,24 @@ function clearUnusedSelection(panel) {
 }
 
 function renderUnusedCandidates(panel) {
-  const visible = getVisibleUnusedCandidates(panel);
-  panel.$.unusedCandidateRows.innerHTML = "";
-  panel.$.unusedCandidateEmpty.style.display = visible.length ? "none" : "block";
-  panel.$.unusedSelectVisibleButton.disabled = visible.length === 0;
-  panel.$.unusedClearSelectionButton.disabled = unusedSelectedPaths.size === 0;
-  if (!unusedSummary) {
-    panel.$.unusedSummary.textContent = "只展示和定位候选，不提供删除。脚本与 Shader Chunk 强制保护，动态加载需要人工复核。";
-  } else {
-    const summary = unusedSummary;
-    panel.$.unusedSummary.textContent = `主场景 ${summary.scene}，扫描 ${summary.scanDirectory}：纳入判断 ${safeNumber(summary.scannedCount)} 项，可达 ${safeNumber(summary.reachableCount)} 项，候选 ${safeNumber(summary.candidateCount)} 项（${formatSize(summary.candidateTotalSize || 0)}），保护 ${safeNumber(summary.protectedCount)} 项，未解析 UUID ${safeNumber(summary.unresolvedReferenceCount)} 个；当前筛选显示 ${visible.length} 项。`;
-  }
-  for (const item of visible) {
-    const row = document.createElement("tr");
-    row.innerHTML = `
-      <td class="check"><input type="checkbox"></td>
-      <td class="path" title="${escapeHtml(item.path)}">${escapeHtml(item.path)}</td>
-      <td>${escapeHtml(item.extension || "-")}</td>
-      <td>${formatSize(item.size || 0)}</td>
-      <td class="warning">动态加载与运行时引用未知</td>
-      <td><button class="locate">定位</button></td>
-    `;
-    const checkbox = row.querySelector("input");
-    checkbox.checked = unusedSelectedPaths.has(item.path);
-    checkbox.addEventListener("change", () => {
-      checkbox.checked ? unusedSelectedPaths.add(item.path) : unusedSelectedPaths.delete(item.path);
+  renderUnusedCandidatesView(panel, {
+    unusedCandidates,
+    unusedSelectedPaths,
+    unusedSummary,
+    search: panel.$.unusedSearchInput.value,
+    extensions: panel.$.unusedExtensionInput.value
+  }, {
+    document,
+    locate: (path) => locate(panel, path),
+    onToggleCandidate: (path, checked) => {
+      checked ? unusedSelectedPaths.add(path) : unusedSelectedPaths.delete(path);
       unusedDeletePlan = null;
       panel.$.unusedClearSelectionButton.disabled = unusedSelectedPaths.size === 0;
       renderUnusedDeletePlan(panel);
-    });
-    row.querySelector(".locate").addEventListener("click", () => locate(panel, item.path));
-    panel.$.unusedCandidateRows.appendChild(row);
-  }
+    }
+  });
   renderUnusedDeletePlan(panel);
+  renderOverview(panel);
 }
 
 async function previewUnusedDelete(panel) {
@@ -1833,28 +2036,12 @@ async function previewUnusedDelete(panel) {
 }
 
 function renderUnusedDeletePlan(panel) {
-  panel.$.unusedDeleteRows.innerHTML = "";
-  const hasPlan = !!unusedDeletePlan;
-  panel.$.unusedDeleteEmpty.style.display = hasPlan ? "none" : "block";
-  if (!hasPlan) {
-    panel.$.unusedDeleteSummary.textContent = `已勾选 ${unusedSelectedPaths.size} 项；默认不选中任何候选。执行前会重新校验候选并创建备份。`;
-    panel.$.unusedDeleteExecuteButton.disabled = true;
-    return;
-  }
-  const summary = unusedDeletePlan.summary || {};
-  panel.$.unusedDeleteSummary.textContent = `删除预览：共 ${safeNumber(summary.total)} 项，可删除 ${safeNumber(summary.ready)} 项，阻止 ${safeNumber(summary.blocked)} 项，资源体积 ${formatSize(summary.totalSize || 0)}；备份范围 ${formatUnusedDeleteBackupScope(summary.backupScope)}。`;
-  for (const item of unusedDeletePlan.items || []) {
-    const row = document.createElement("tr");
-    row.innerHTML = `
-      <td class="${item.status === "ready" ? "ready" : "blocked"}">${item.status === "ready" ? "可删除" : "已阻止"}</td>
-      <td class="path" title="${escapeHtml(item.path)}">${escapeHtml(item.path)}</td>
-      <td>${escapeHtml(item.extension || "-")}</td>
-      <td>${formatSize(item.size || 0)}</td>
-      <td>${escapeHtml(item.reason || "-")}</td>
-    `;
-    panel.$.unusedDeleteRows.appendChild(row);
-  }
-  panel.$.unusedDeleteExecuteButton.disabled = !panel.$.unusedDeleteConfirmedInput.checked || safeNumber(summary.ready) <= 0;
+  renderUnusedDeletePlanView(panel, {
+    unusedDeletePlan,
+    unusedSelectedPaths,
+    confirmed: panel.$.unusedDeleteConfirmedInput.checked
+  }, { document });
+  renderOverview(panel);
 }
 
 async function executeUnusedDelete(panel) {
@@ -1901,11 +2088,13 @@ async function checkResourcesRuntime(panel) {
       codeDirectories: panel.$.resourcesCodeDirectoriesInput.value,
       resourcesDirectory: panel.$.resourcesDirectoryInput.value
     });
-    resourcesRuntimeResources = result.resources || [];
-    resourcesRuntimeStaticCalls = result.staticCalls || [];
-    resourcesRuntimeUnused = result.unusedResources || [];
-    resourcesRuntimeDynamicCalls = result.dynamicCalls || [];
-    resourcesRuntimeSummary = result.summary || null;
+    ({
+      resourcesRuntimeResources,
+      resourcesRuntimeStaticCalls,
+      resourcesRuntimeUnused,
+      resourcesRuntimeDynamicCalls,
+      resourcesRuntimeSummary
+    } = buildResourcesRuntimeResultState(result));
     if (!isCompleteResourcesRuntimeResult(result)) {
       const message = "resources 动态加载检查接口返回旧结构或字段不完整。请重载 asset-steward 后重新检查。";
       resetResourcesRuntimeResult();
@@ -1934,84 +2123,31 @@ async function checkResourcesRuntime(panel) {
 }
 
 function resetResourcesRuntimeResult() {
-  resourcesRuntimeResources = [];
-  resourcesRuntimeStaticCalls = [];
-  resourcesRuntimeUnused = [];
-  resourcesRuntimeDynamicCalls = [];
-  resourcesRuntimeSummary = null;
+  ({
+    resourcesRuntimeResources,
+    resourcesRuntimeStaticCalls,
+    resourcesRuntimeUnused,
+    resourcesRuntimeDynamicCalls,
+    resourcesRuntimeSummary
+  } = buildResourcesRuntimeResultState());
+}
+
+function createHealthRenderDeps(panel) {
+  return {
+    document,
+    locate: (path) => locate(panel, path)
+  };
 }
 
 function renderResourcesRuntime(panel) {
-  renderResourcesRuntimeSummary(panel);
-  renderResourcesUnused(panel);
-  renderResourcesCalls(panel);
-  renderResourcesAll(panel);
-}
-
-function renderResourcesRuntimeSummary(panel) {
-  if (!resourcesRuntimeSummary) {
-    panel.$.resourcesRuntimeSummary.textContent = "只静态检查 resources.load/loadDir；变量、拼接路径和封装调用需要人工复核。";
-    return;
-  }
-  const summary = resourcesRuntimeSummary;
-  const directoryState = summary.resourcesDirectoryExists === false ? `；${summary.resourcesDirectory || "assets/resources"} 当前不存在` : "";
-  panel.$.resourcesRuntimeSummary.textContent = `扫描 resources 资源 ${safeNumber(summary.resourceCount)} 项、代码文件 ${safeNumber(summary.scannedCodeFileCount)} 个；静态调用 ${safeNumber(summary.staticCallCount)} 项，其中疑似缺失 ${safeNumber(summary.missingCallCount)} 项；动态调用 ${safeNumber(summary.dynamicCallCount)} 项；疑似未加载资源 ${safeNumber(summary.unusedResourceCount)} 项${directoryState}。`;
-}
-
-function renderResourcesUnused(panel) {
-  panel.$.resourcesUnusedRows.innerHTML = "";
-  panel.$.resourcesUnusedEmpty.style.display = resourcesRuntimeUnused.length ? "none" : "block";
-  for (const resource of resourcesRuntimeUnused) {
-    const row = document.createElement("tr");
-    row.innerHTML = `
-      <td class="path" title="${escapeHtml(resource.path)}">${escapeHtml(resource.path)}</td>
-      <td class="path" title="${escapeHtml(resource.loadPath)}">${escapeHtml(resource.loadPath)}</td>
-      <td>${escapeHtml(resource.extension || "-")}</td>
-      <td>${formatSize(resource.size || 0)}</td>
-      <td><button class="locate">定位</button></td>
-    `;
-    row.querySelector(".locate").addEventListener("click", () => locate(panel, resource.path));
-    panel.$.resourcesUnusedRows.appendChild(row);
-  }
-}
-
-function renderResourcesCalls(panel) {
-  const calls = [...resourcesRuntimeStaticCalls, ...resourcesRuntimeDynamicCalls]
-    .sort((left, right) => String(left.codePath).localeCompare(String(right.codePath), "zh-CN") || left.line - right.line);
-  panel.$.resourcesCallRows.innerHTML = "";
-  panel.$.resourcesCallEmpty.style.display = calls.length ? "none" : "block";
-  for (const call of calls) {
-    const row = document.createElement("tr");
-    const displayPath = call.kind === "static" ? call.runtimePath : call.expression;
-    row.innerHTML = `
-      <td class="${formatRuntimeCallStatusClass(call)}">${formatRuntimeCallStatus(call)}</td>
-      <td>${escapeHtml(call.method || "-")}</td>
-      <td class="path" title="${escapeHtml(displayPath || "")}">${escapeHtml(displayPath || "(空路径)")}</td>
-      <td class="path" title="${escapeHtml(call.codePath)}:${safeNumber(call.line)}">${escapeHtml(call.codePath)}:${safeNumber(call.line)}</td>
-      <td>${safeNumber(call.matchCount)}</td>
-      <td><button class="locate">定位代码</button></td>
-    `;
-    row.querySelector(".locate").addEventListener("click", () => locate(panel, call.codePath));
-    panel.$.resourcesCallRows.appendChild(row);
-  }
-}
-
-function renderResourcesAll(panel) {
-  panel.$.resourcesAllRows.innerHTML = "";
-  panel.$.resourcesAllEmpty.style.display = resourcesRuntimeResources.length ? "none" : "block";
-  for (const resource of resourcesRuntimeResources) {
-    const row = document.createElement("tr");
-    row.innerHTML = `
-      <td class="${resource.used ? "ready" : "warning"}">${resource.used ? "静态命中" : "待复核"}</td>
-      <td class="path" title="${escapeHtml(resource.path)}">${escapeHtml(resource.path)}</td>
-      <td class="path" title="${escapeHtml(resource.loadPath)}">${escapeHtml(resource.loadPath)}</td>
-      <td>${escapeHtml(resource.extension || "-")}</td>
-      <td>${formatSize(resource.size || 0)}</td>
-      <td><button class="locate">定位</button></td>
-    `;
-    row.querySelector(".locate").addEventListener("click", () => locate(panel, resource.path));
-    panel.$.resourcesAllRows.appendChild(row);
-  }
+  renderResourcesRuntimeView(panel, {
+    resourcesRuntimeResources,
+    resourcesRuntimeStaticCalls,
+    resourcesRuntimeUnused,
+    resourcesRuntimeDynamicCalls,
+    resourcesRuntimeSummary
+  }, createHealthRenderDeps(panel));
+  renderOverview(panel);
 }
 
 async function reportPackageSize(panel) {
@@ -2024,11 +2160,13 @@ async function reportPackageSize(panel) {
       topN: panel.$.packageSizeTopNInput.value,
       includeMeta: panel.$.packageSizeIncludeMetaInput.checked
     });
-    packageDirectoryRanking = result.directoryRanking || [];
-    packageTypeRanking = result.typeRanking || [];
-    packageTopFiles = result.topFiles || [];
-    packageReferencedTopFiles = result.referencedTopFiles || [];
-    packageSizeSummary = result.summary || null;
+    ({
+      packageDirectoryRanking,
+      packageTypeRanking,
+      packageTopFiles,
+      packageReferencedTopFiles,
+      packageSizeSummary
+    } = buildPackageSizeResultState(result));
     if (!isCompletePackageSizeResult(result)) {
       const message = "包体贡献统计接口返回旧结构或字段不完整。请重载 asset-steward 后重新统计。";
       resetPackageSizeResult();
@@ -2050,99 +2188,24 @@ async function reportPackageSize(panel) {
 }
 
 function resetPackageSizeResult() {
-  packageDirectoryRanking = [];
-  packageTypeRanking = [];
-  packageTopFiles = [];
-  packageReferencedTopFiles = [];
-  packageSizeSummary = null;
+  ({
+    packageDirectoryRanking,
+    packageTypeRanking,
+    packageTopFiles,
+    packageReferencedTopFiles,
+    packageSizeSummary
+  } = buildPackageSizeResultState());
 }
 
 function renderPackageSize(panel) {
-  renderPackageSizeSummary(panel);
-  renderPackageDirectoryRanking(panel);
-  renderPackageTypeRanking(panel);
-  renderPackageTopFiles(panel);
-  renderPackageReferencedTopFiles(panel);
-}
-
-function renderPackageSizeSummary(panel) {
-  if (!packageSizeSummary) {
-    panel.$.packageSizeSummary.textContent = "统计项目源资源磁盘体积，不等同于最终构建包体。";
-    return;
-  }
-  const summary = packageSizeSummary;
-  const metaText = summary.includeMeta
-    ? "包含 .meta"
-    : `排除 .meta ${safeNumber(summary.excludedMetaCount)} 项（${formatSize(summary.excludedMetaSize || 0)}）`;
-  panel.$.packageSizeSummary.textContent = `扫描 ${summary.scanDirectory || "assets"}：文件 ${safeNumber(summary.fileCount)} 项，总大小 ${formatSize(summary.totalSize || 0)}，子目录 ${safeNumber(summary.directoryCount)} 个，类型 ${safeNumber(summary.typeCount)} 类，Top ${safeNumber(summary.topN)}；主场景递归可达 ${safeNumber(summary.referencedFileCount)} 项（${formatSize(summary.referencedTotalSize || 0)}），未解析 UUID ${safeNumber(summary.unresolvedReferenceCount)} 个；${metaText}。`;
-}
-
-function renderPackageDirectoryRanking(panel) {
-  panel.$.packageDirectoryRows.innerHTML = "";
-  panel.$.packageDirectoryEmpty.style.display = packageDirectoryRanking.length ? "none" : "block";
-  for (const item of packageDirectoryRanking) {
-    const row = document.createElement("tr");
-    row.innerHTML = `
-      <td class="path" title="${escapeHtml(item.path)}">${escapeHtml(item.path)}</td>
-      <td>${safeNumber(item.count)}</td>
-      <td>${formatSize(item.totalSize || 0)}</td>
-      <td>${formatPercent(item.totalSize, packageSizeSummary?.totalSize)}</td>
-      <td><button class="locate">定位</button></td>
-    `;
-    row.querySelector(".locate").addEventListener("click", () => locate(panel, item.path));
-    panel.$.packageDirectoryRows.appendChild(row);
-  }
-}
-
-function renderPackageTypeRanking(panel) {
-  panel.$.packageTypeRows.innerHTML = "";
-  panel.$.packageTypeEmpty.style.display = packageTypeRanking.length ? "none" : "block";
-  for (const item of packageTypeRanking) {
-    const row = document.createElement("tr");
-    row.innerHTML = `
-      <td>${escapeHtml(item.extension || "-")}</td>
-      <td>${safeNumber(item.count)}</td>
-      <td>${formatSize(item.totalSize || 0)}</td>
-      <td>${formatPercent(item.totalSize, packageSizeSummary?.totalSize)}</td>
-    `;
-    panel.$.packageTypeRows.appendChild(row);
-  }
-}
-
-function renderPackageTopFiles(panel) {
-  panel.$.packageTopFileRows.innerHTML = "";
-  panel.$.packageTopFileEmpty.style.display = packageTopFiles.length ? "none" : "block";
-  for (const item of packageTopFiles) {
-    const row = document.createElement("tr");
-    row.innerHTML = `
-      <td class="path" title="${escapeHtml(item.path)}">${escapeHtml(item.path)}</td>
-      <td>${escapeHtml(item.extension || "-")}</td>
-      <td>${formatSize(item.size || 0)}</td>
-      <td>${formatPercent(item.size, packageSizeSummary?.totalSize)}</td>
-      <td><button class="locate">定位</button></td>
-    `;
-    row.querySelector(".locate").addEventListener("click", () => locate(panel, item.path));
-    panel.$.packageTopFileRows.appendChild(row);
-  }
-}
-
-function renderPackageReferencedTopFiles(panel) {
-  panel.$.packageReferencedFileRows.innerHTML = "";
-  panel.$.packageReferencedFileEmpty.style.display = packageReferencedTopFiles.length ? "none" : "block";
-  for (const item of packageReferencedTopFiles) {
-    const chain = Array.isArray(item.chain) ? item.chain : [];
-    const chainText = chain.join(" -> ");
-    const row = document.createElement("tr");
-    row.innerHTML = `
-      <td class="path" title="${escapeHtml(item.path)}">${escapeHtml(item.path)}</td>
-      <td>${escapeHtml(item.extension || "-")}</td>
-      <td>${formatSize(item.size || 0)}</td>
-      <td class="reference-chain" title="${escapeHtml(chainText)}">${escapeHtml(formatReferenceChain(chain))}</td>
-      <td><button class="locate">定位</button></td>
-    `;
-    row.querySelector(".locate").addEventListener("click", () => locate(panel, item.path));
-    panel.$.packageReferencedFileRows.appendChild(row);
-  }
+  renderPackageSizeView(panel, {
+    packageDirectoryRanking,
+    packageTypeRanking,
+    packageTopFiles,
+    packageReferencedTopFiles,
+    packageSizeSummary
+  }, createHealthRenderDeps(panel));
+  renderOverview(panel);
 }
 
 async function checkDirectoryConvention(panel) {
@@ -2153,8 +2216,10 @@ async function checkDirectoryConvention(panel) {
       directory: panel.$.directoryConventionInput.value,
       rules
     });
-    directoryConventionMismatches = result.mismatches || [];
-    directoryConventionSummary = result.summary || null;
+    ({
+      directoryConventionMismatches,
+      directoryConventionSummary
+    } = buildDirectoryConventionResultState(result));
     if (!isCompleteDirectoryConventionResult(result)) {
       const message = "目录规范检查接口返回旧结构或字段不完整。请重载 asset-steward 后重新检查。";
       resetDirectoryConventionResult();
@@ -2176,34 +2241,18 @@ async function checkDirectoryConvention(panel) {
 }
 
 function resetDirectoryConventionResult() {
-  directoryConventionMismatches = [];
-  directoryConventionSummary = null;
+  ({
+    directoryConventionMismatches,
+    directoryConventionSummary
+  } = buildDirectoryConventionResultState());
 }
 
 function renderDirectoryConvention(panel) {
-  panel.$.directoryConventionRows.innerHTML = "";
-  panel.$.directoryConventionEmpty.style.display = directoryConventionMismatches.length ? "none" : "block";
-  panel.$.directoryConventionPreviewButton.disabled = directoryConventionMismatches.length === 0;
-  if (!directoryConventionSummary) {
-    panel.$.directoryConventionSummary.textContent = "复用当前自动分类规则，只报告首个命中规则下目录不符合的资源。";
-  } else {
-    const summary = directoryConventionSummary;
-    panel.$.directoryConventionSummary.textContent = `扫描 ${summary.scanDirectory || "assets/res"}：文件 ${safeNumber(summary.fileCount)} 项，启用规则 ${safeNumber(summary.ruleCount)} 条；命中 ${safeNumber(summary.matchedCount)} 项，目录正确 ${safeNumber(summary.compliantCount)} 项，不符合 ${safeNumber(summary.mismatchCount)} 项，未命中 ${safeNumber(summary.unmatchedCount)} 项，缺少 meta ${safeNumber(summary.missingMetaCount)} 项。`;
-  }
-  for (const item of directoryConventionMismatches) {
-    const row = document.createElement("tr");
-    row.innerHTML = `
-      <td class="path" title="${escapeHtml(item.path)}">${escapeHtml(item.path)}</td>
-      <td>${escapeHtml(item.extension || "-")}</td>
-      <td class="path" title="${escapeHtml(item.currentDirectory)}">${escapeHtml(item.currentDirectory)}</td>
-      <td class="path" title="${escapeHtml(item.suggestedDirectory)}">${escapeHtml(item.suggestedDirectory)}</td>
-      <td>${escapeHtml(item.ruleId || "-")}</td>
-      <td class="${item.missingMeta ? "blocked" : "warning"}">${item.missingMeta ? "缺少 meta" : "建议移动"}</td>
-      <td><button class="locate">定位</button></td>
-    `;
-    row.querySelector(".locate").addEventListener("click", () => locate(panel, item.path));
-    panel.$.directoryConventionRows.appendChild(row);
-  }
+  renderDirectoryConventionView(panel, {
+    directoryConventionMismatches,
+    directoryConventionSummary
+  }, createHealthRenderDeps(panel));
+  renderOverview(panel);
 }
 
 async function previewDirectoryConvention(panel) {
@@ -2246,8 +2295,10 @@ async function checkMaterialTextures(panel) {
       directory: panel.$.materialTextureDirectoryInput.value,
       scene: panel.$.materialTextureSceneInput.value
     });
-    materialTextureReferences = result.references || [];
-    materialTextureSummary = result.summary || null;
+    ({
+      materialTextureReferences,
+      materialTextureSummary
+    } = buildMaterialTextureResultState(result));
     if (!isCompleteMaterialTextureResult(result)) {
       const message = "材质贴图检查接口返回旧结构或字段不完整。请重载 asset-steward 后重新检查。";
       resetMaterialTextureResult();
@@ -2270,36 +2321,18 @@ async function checkMaterialTextures(panel) {
 }
 
 function resetMaterialTextureResult() {
-  materialTextureReferences = [];
-  materialTextureSummary = null;
+  ({
+    materialTextureReferences,
+    materialTextureSummary
+  } = buildMaterialTextureResultState());
 }
 
 function renderMaterialTextures(panel) {
-  panel.$.materialTextureRows.innerHTML = "";
-  panel.$.materialTextureEmpty.style.display = materialTextureReferences.length ? "none" : "block";
-  if (!materialTextureSummary) {
-    panel.$.materialTextureSummary.textContent = "扫描 .mtl/.material/.pmtl；无法解析的贴图 UUID 标记为待复核，不自动修复。";
-  } else {
-    const summary = materialTextureSummary;
-    panel.$.materialTextureSummary.textContent = `扫描 ${summary.scanDirectory || "assets/res"}：材质 ${safeNumber(summary.materialCount)} 个，主场景可达 ${safeNumber(summary.reachableMaterialCount)} 个、不可达 ${safeNumber(summary.unreachableMaterialCount)} 个；贴图引用 ${safeNumber(summary.textureReferenceCount)} 条，已解析 ${safeNumber(summary.resolvedReferenceCount)} 条、待复核 ${safeNumber(summary.reviewReferenceCount)} 条；无贴图引用材质 ${safeNumber(summary.noTextureMaterialCount)} 个，无法解析材质文件 ${safeNumber(summary.invalidMaterialCount)} 个。`;
-  }
-  for (const item of materialTextureReferences) {
-    const row = document.createElement("tr");
-    row.innerHTML = `
-      <td class="${formatMaterialTextureStatusClass(item.status)}">${formatMaterialTextureStatus(item.status)}</td>
-      <td class="${item.materialReachable ? "ready" : "warning"}">${item.materialReachable ? "是" : "否"}</td>
-      <td class="path" title="${escapeHtml(item.materialPath)}">${escapeHtml(item.materialPath)}</td>
-      <td class="path" title="${escapeHtml(item.propertyPath || "-")}">${escapeHtml(item.propertyPath || "-")}</td>
-      <td class="path" title="${escapeHtml(item.uuid || "-")}">${escapeHtml(item.uuid || "-")}</td>
-      <td class="path" title="${escapeHtml(item.texturePath || "-")}">${escapeHtml(item.texturePath || "-")}</td>
-      <td><button class="locate-material">定位材质</button> <button class="locate-texture" ${item.texturePath ? "" : "disabled"}>定位贴图</button></td>
-    `;
-    row.querySelector(".locate-material").addEventListener("click", () => locate(panel, item.materialPath));
-    if (item.texturePath) {
-      row.querySelector(".locate-texture").addEventListener("click", () => locate(panel, item.texturePath));
-    }
-    panel.$.materialTextureRows.appendChild(row);
-  }
+  renderMaterialTexturesView(panel, {
+    materialTextureReferences,
+    materialTextureSummary
+  }, createHealthRenderDeps(panel));
+  renderOverview(panel);
 }
 
 async function checkDuplicateAssets(panel) {
@@ -2309,9 +2342,11 @@ async function checkDuplicateAssets(panel) {
     const result = await requestMain("check-duplicate-assets", {
       directory: panel.$.duplicateAssetDirectoryInput.value
     });
-    duplicateSameNameGroups = result.sameNameGroups || [];
-    duplicateHashGroups = result.duplicateHashGroups || [];
-    duplicateAssetSummary = result.summary || null;
+    ({
+      duplicateSameNameGroups,
+      duplicateHashGroups,
+      duplicateAssetSummary
+    } = buildDuplicateAssetResultState(result));
     if (!isCompleteDuplicateAssetResult(result)) {
       const message = "重复资源检查接口返回旧结构或字段不完整。请重载 asset-steward 后重新检查。";
       resetDuplicateAssetResult();
@@ -2335,42 +2370,20 @@ async function checkDuplicateAssets(panel) {
 }
 
 function resetDuplicateAssetResult() {
-  duplicateSameNameGroups = [];
-  duplicateHashGroups = [];
-  duplicateAssetSummary = null;
+  ({
+    duplicateSameNameGroups,
+    duplicateHashGroups,
+    duplicateAssetSummary
+  } = buildDuplicateAssetResultState());
 }
 
 function renderDuplicateAssets(panel) {
-  panel.$.duplicateSameNameRows.innerHTML = "";
-  panel.$.duplicateHashRows.innerHTML = "";
-  panel.$.duplicateSameNameEmpty.style.display = duplicateSameNameGroups.length ? "none" : "block";
-  panel.$.duplicateHashEmpty.style.display = duplicateHashGroups.length ? "none" : "block";
-  if (!duplicateAssetSummary) {
-    panel.$.duplicateAssetSummary.textContent = "检查不同目录同名资源和 SHA-256 相同内容；只报告和定位，不自动删除。";
-  } else {
-    const summary = duplicateAssetSummary;
-    panel.$.duplicateAssetSummary.textContent = `扫描 ${summary.scanDirectory || "assets/res"}：资源 ${safeNumber(summary.fileCount)} 项，hash 候选 ${safeNumber(summary.hashCandidateCount)} 项；同名 ${safeNumber(summary.sameNameGroupCount)} 组/${safeNumber(summary.sameNameFileCount)} 项，重复内容 ${safeNumber(summary.duplicateHashGroupCount)} 组/${safeNumber(summary.duplicateHashFileCount)} 项，理论可减少重复体积 ${formatSize(summary.duplicateBytes || 0)}。`;
-  }
-  renderDuplicateGroupRows(panel, panel.$.duplicateSameNameRows, duplicateSameNameGroups, (group) => group.name || group.key);
-  renderDuplicateGroupRows(panel, panel.$.duplicateHashRows, duplicateHashGroups, (group) => formatShortHash(group.hash || group.key));
-}
-
-function renderDuplicateGroupRows(panel, target, groups, formatGroupKey) {
-  for (const group of groups) {
-    for (const member of group.members || []) {
-      const row = document.createElement("tr");
-      row.innerHTML = `
-        <td class="path" title="${escapeHtml(group.key || "-")}">${escapeHtml(formatGroupKey(group))}</td>
-        <td>${safeNumber(group.members?.length)}</td>
-        <td class="path" title="${escapeHtml(member.path)}">${escapeHtml(member.path)}</td>
-        <td>${escapeHtml(member.extension || "-")}</td>
-        <td>${formatSize(member.size || 0)}</td>
-        <td><button class="locate">定位</button></td>
-      `;
-      row.querySelector(".locate").addEventListener("click", () => locate(panel, member.path));
-      target.appendChild(row);
-    }
-  }
+  renderDuplicateAssetsView(panel, {
+    duplicateSameNameGroups,
+    duplicateHashGroups,
+    duplicateAssetSummary
+  }, createHealthRenderDeps(panel));
+  renderOverview(panel);
 }
 
 async function checkScenePrefabReferenceHealth(panel) {
@@ -2382,8 +2395,10 @@ async function checkScenePrefabReferenceHealth(panel) {
       extensions: panel.$.scenePrefabHealthExtensionInput.value,
       whitelist: panel.$.scenePrefabHealthWhitelistInput.value
     });
-    scenePrefabReferenceIssues = result.issues || [];
-    scenePrefabReferenceSummary = result.summary || null;
+    ({
+      scenePrefabReferenceIssues,
+      scenePrefabReferenceSummary
+    } = buildScenePrefabReferenceHealthResultState(result));
     if (!isCompleteScenePrefabReferenceHealthResult(result)) {
       const message = "场景和 Prefab 引用健康接口返回旧结构或字段不完整。请重载 asset-steward 后重新检查。";
       resetScenePrefabReferenceHealthResult();
@@ -2406,32 +2421,18 @@ async function checkScenePrefabReferenceHealth(panel) {
 }
 
 function resetScenePrefabReferenceHealthResult() {
-  scenePrefabReferenceIssues = [];
-  scenePrefabReferenceSummary = null;
+  ({
+    scenePrefabReferenceIssues,
+    scenePrefabReferenceSummary
+  } = buildScenePrefabReferenceHealthResultState());
 }
 
 function renderScenePrefabReferenceHealth(panel) {
-  panel.$.scenePrefabHealthRows.innerHTML = "";
-  panel.$.scenePrefabHealthEmpty.style.display = scenePrefabReferenceIssues.length ? "none" : "block";
-  if (!scenePrefabReferenceSummary) {
-    panel.$.scenePrefabHealthSummary.textContent = "无法解析 UUID 标记为待复核；白名单精确匹配，只报告和定位，不自动修复。";
-  } else {
-    const summary = scenePrefabReferenceSummary;
-    panel.$.scenePrefabHealthSummary.textContent = `扫描 ${summary.scanDirectory || "assets"}：文件 ${safeNumber(summary.scannedFileCount)} 个，UUID 引用 ${safeNumber(summary.referenceCount)} 次；已解析 ${safeNumber(summary.resolvedReferenceCount)} 次，白名单 ${safeNumber(summary.whitelistReferenceCount)} 次，待复核 ${safeNumber(summary.unresolvedReferenceCount)} 次/${safeNumber(summary.unresolvedUuidCount)} 个 UUID，涉及 ${safeNumber(summary.affectedFileCount)} 个文件。`;
-  }
-  for (const item of scenePrefabReferenceIssues) {
-    const row = document.createElement("tr");
-    row.innerHTML = `
-      <td class="warning">待复核</td>
-      <td class="path" title="${escapeHtml(item.filePath)}">${escapeHtml(item.filePath)}</td>
-      <td>${escapeHtml(item.extension || "-")}</td>
-      <td class="path" title="${escapeHtml(item.uuid || "-")}">${escapeHtml(item.uuid || "-")}</td>
-      <td>${safeNumber(item.matchCount)}</td>
-      <td><button class="locate">定位</button></td>
-    `;
-    row.querySelector(".locate").addEventListener("click", () => locate(panel, item.filePath));
-    panel.$.scenePrefabHealthRows.appendChild(row);
-  }
+  renderScenePrefabReferenceHealthView(panel, {
+    scenePrefabReferenceIssues,
+    scenePrefabReferenceSummary
+  }, createHealthRenderDeps(panel));
+  renderOverview(panel);
 }
 
 async function scan(panel) {
@@ -2443,24 +2444,32 @@ async function scan(panel) {
       search: panel.$.searchInput.value,
       extensions: panel.$.extensionInput.value
     });
-    entries = result.entries || [];
-    directories = result.directories || [];
-    selectedPaths = new Set([...selectedPaths].filter((path) => entries.some((entry) => entry.path === path)));
+    ({
+      entries,
+      directories,
+      classifyScanSummary
+    } = buildClassifyScanResultState(result));
+    selectedPaths = filterSelectedPathsByEntries(selectedPaths, entries);
     fillDirectories(panel);
     renderAssets(panel);
-    const summary = result.summary;
+    const summary = classifyScanSummary;
     if (!summary || !Number.isFinite(Number(summary.visibleCount))) {
       await addLog(panel, "warning", "自动分类扫描接口返回字段不完整，请重载扩展后重试。");
       throw new Error("扫描结果字段不完整，请重载扩展。");
     }
-    panel.$.scanSummary.textContent = `当前显示 ${summary.visibleCount} 项；全项目缺少 meta ${summary.missingMetaCount} 项；孤立 meta ${summary.orphanMetaCount} 项；已选择 ${selectedPaths.size} 项。`;
+    panel.$.scanSummary.textContent = formatClassifyScanSummary(summary, selectedPaths.size);
+    renderOverview(panel);
     setStatus(panel, summary.missingMetaCount || summary.orphanMetaCount
       ? "检测到 meta 异常，相关资源会被阻止移动，请先人工处理。"
       : "扫描完成。选择资源后生成移动预览。");
   } catch (error) {
-    entries = [];
-    directories = [];
+    ({
+      entries,
+      directories,
+      classifyScanSummary
+    } = buildClassifyScanResultState());
     renderAssets(panel);
+    renderOverview(panel);
     await addLog(panel, "error", `自动分类扫描失败：${error.message}`);
     setStatus(panel, `扫描失败：${error.message}`);
   } finally {
@@ -2481,51 +2490,35 @@ function fillDirectories(panel) {
 }
 
 function renderAssets(panel) {
-  panel.$.assetRows.innerHTML = "";
-  panel.$.assetEmpty.style.display = entries.length ? "none" : "block";
-  for (const entry of entries) {
-    const row = document.createElement("tr");
-    row.innerHTML = `
-      <td class="check"><input type="checkbox" ${entry.selectable ? "" : "disabled"}></td>
-      <td class="path" title="${escapeHtml(entry.path)}">${escapeHtml(entry.path)}</td>
-      <td>${escapeHtml(entry.extension)}</td>
-      <td>${entry.kind === "directory" ? "-" : formatSize(entry.size)}</td>
-      <td class="${entry.missingMeta ? "warning" : ""}">${entry.missingMeta ? "缺少 meta" : "正常"}</td>
-      <td><button class="locate">定位</button></td>
-    `;
-    const checkbox = row.querySelector("input");
-    checkbox.checked = selectedPaths.has(entry.path);
-    checkbox.addEventListener("change", () => {
-      checkbox.checked ? selectedPaths.add(entry.path) : selectedPaths.delete(entry.path);
+  renderClassifyAssetsView(panel, {
+    entries,
+    selectedPaths,
+  }, {
+    locate: (path) => locate(panel, path),
+    onSelectionChange: (path, checked) => {
+      selectedPaths = toggleClassifySelection(selectedPaths, path, checked);
       invalidatePlan(panel);
       updateSelectionSummary(panel);
-    });
-    row.querySelector(".locate").addEventListener("click", () => locate(panel, entry.path));
-    panel.$.assetRows.appendChild(row);
-  }
+    },
+  });
 }
 
 function selectVisible(panel) {
-  for (const entry of entries) {
-    if (entry.selectable) {
-      selectedPaths.add(entry.path);
-    }
-  }
+  selectedPaths = selectVisibleClassifyEntries(selectedPaths, entries);
   invalidatePlan(panel);
   renderAssets(panel);
   updateSelectionSummary(panel);
 }
 
 function clearSelection(panel) {
-  selectedPaths.clear();
+  selectedPaths = clearClassifySelection();
   invalidatePlan(panel);
   renderAssets(panel);
   updateSelectionSummary(panel);
 }
 
 function updateSelectionSummary(panel) {
-  const current = panel.$.scanSummary.textContent.replace(/；已选择 \d+ 项。$/, "");
-  panel.$.scanSummary.textContent = `${current}；已选择 ${selectedPaths.size} 项。`;
+  panel.$.scanSummary.textContent = formatClassifyScanSummary(classifyScanSummary, selectedPaths.size);
 }
 
 function updateMode(panel) {
@@ -2536,41 +2529,29 @@ function updateMode(panel) {
 }
 
 function renderRules(panel) {
-  panel.$.ruleRows.innerHTML = "";
-  for (const rule of rules) {
-    const row = document.createElement("div");
-    row.className = "rule-row";
-    row.innerHTML = `
-      <input class="enabled" type="checkbox" title="启用规则">
-      <input class="extensions" value="${escapeHtml((rule.extensions || []).join(","))}" placeholder=".prefab,.fbx" title="逗号分隔扩展名">
-      <input class="keywords" value="${escapeHtml((rule.nameKeywords || []).join(","))}" placeholder="文件名关键词；留空为兜底" title="逗号分隔，忽略大小写，任一关键词命中即匹配">
-      <input class="target" value="${escapeHtml(rule.target || "")}" placeholder="assets/res/prefab" title="目标目录；自动分类执行时可自动创建">
-      <button class="remove" title="删除规则">×</button>
-    `;
-    row.querySelector(".enabled").checked = rule.enabled !== false;
-    row.querySelector(".enabled").addEventListener("change", (event) => {
-      rule.enabled = event.target.checked;
+  renderClassifyRulesView(panel, rules, {
+    onRuleEnabledChange: (rule, checked) => {
+      rule.enabled = checked;
       invalidatePlan(panel);
-    });
-    row.querySelector(".extensions").addEventListener("change", (event) => {
-      rule.extensions = event.target.value.split(",");
+    },
+    onRuleExtensionsChange: (rule, value) => {
+      rule.extensions = value.split(",");
       invalidatePlan(panel);
-    });
-    row.querySelector(".keywords").addEventListener("change", (event) => {
-      rule.nameKeywords = event.target.value.split(",");
+    },
+    onRuleKeywordsChange: (rule, value) => {
+      rule.nameKeywords = value.split(",");
       invalidatePlan(panel);
-    });
-    row.querySelector(".target").addEventListener("change", (event) => {
-      rule.target = event.target.value;
+    },
+    onRuleTargetChange: (rule, value) => {
+      rule.target = value;
       invalidatePlan(panel);
-    });
-    row.querySelector(".remove").addEventListener("click", () => {
+    },
+    onRuleRemove: (rule) => {
       rules = rules.filter((item) => item !== rule);
       renderRules(panel);
       invalidatePlan(panel);
-    });
-    panel.$.ruleRows.appendChild(row);
-  }
+    },
+  });
 }
 
 function addRule(panel) {
@@ -2656,43 +2637,18 @@ async function previewReverse(panel) {
 }
 
 function renderPlan(panel) {
-  panel.$.planRows.innerHTML = "";
-  if (!currentPlan) {
-    panel.$.planSummary.textContent = "尚未生成计划。";
-    panel.$.executeButton.disabled = true;
-    return;
-  }
-
-  const summary = currentPlan.summary;
-  panel.$.planSummary.textContent = `共 ${summary.total} 项；可执行 ${summary.ready} 项；阻止 ${summary.blocked} 项；自动重命名 ${summary.renamed} 项；覆盖 ${summary.overwrite} 项；将创建目录 ${summary.createDirectory} 个。`;
-  for (const item of currentPlan.items) {
-    const row = document.createElement("tr");
-    row.innerHTML = `
-      <td class="${item.status === "ready" ? "ready" : "blocked"}">${item.status === "ready" ? "可执行" : "已阻止"}</td>
-      <td>${formatAction(item.action)}</td>
-      <td class="path" title="${escapeHtml(item.source)}">${escapeHtml(item.source)}</td>
-      <td class="path" title="${escapeHtml(item.destination)}">${escapeHtml(item.destination)}</td>
-      <td>${escapeHtml(item.reason || item.ruleId || "-")}</td>
-    `;
-    panel.$.planRows.appendChild(row);
-  }
-  panel.$.executeButton.disabled = summary.ready <= 0;
+  renderClassifyPlanView(panel, currentPlan);
+  renderOverview(panel);
 }
 
 async function execute(panel) {
-  if (!currentPlan?.token) {
-    setStatus(panel, "请先生成移动预览。");
-    return;
-  }
-  if (currentPlan.requiresBackupConfirmation && !panel.$.backupConfirmed.checked) {
-    setStatus(panel, "当前计划包含覆盖项，必须先备份项目并勾选确认。");
+  const blockReason = getMovePlanExecutionBlockReason(currentPlan, panel.$.backupConfirmed.checked);
+  if (blockReason) {
+    setStatus(panel, blockReason);
     return;
   }
 
-  const overwriteText = currentPlan.summary.overwrite > 0
-    ? `\n\n警告：其中 ${currentPlan.summary.overwrite} 项会永久删除现有目标文件，反向计划无法恢复原目标。`
-    : "";
-  if (!window.confirm(`即将通过 Creator AssetDB 移动 ${currentPlan.summary.ready} 项资源。${overwriteText}\n\n继续执行？`)) {
+  if (!window.confirm(formatMovePlanExecutionConfirmMessage(currentPlan))) {
     return;
   }
 
@@ -2704,7 +2660,7 @@ async function execute(panel) {
       backupConfirmed: panel.$.backupConfirmed.checked,
       cleanupEmptyDirectories: panel.$.cleanupEmptyDirectories.checked
     });
-    const resultMessage = `执行完成：移动成功 ${result.moved.length} 项，失败 ${result.failed.length} 项；创建目录 ${result.createdDirectories.length} 个；删除空源目录 ${result.deletedDirectories.length} 个，清理失败 ${result.failedDirectories.length} 个。建议打开相关场景和 Prefab 回归引用。`;
+    const resultMessage = formatMoveExecutionResultMessage(result);
     if (result.failed.length || result.failedDirectories.length) {
       await addLog(panel, "warning", resultMessage);
     } else {
@@ -2724,13 +2680,8 @@ async function execute(panel) {
 }
 
 function renderHistory(panel) {
-  panel.$.historySelect.innerHTML = "";
-  for (const item of history) {
-    const option = document.createElement("option");
-    option.value = item.id;
-    option.textContent = `${formatDate(item.createdAt)} | ${item.kind === "reverse" ? "反向" : "移动"} ${item.movedCount} 项${item.hasOverwrite ? " | 含覆盖" : ""}`;
-    panel.$.historySelect.appendChild(option);
-  }
+  renderHistoryView(panel, history, { document, formatDate });
+  renderOverview(panel);
 }
 
 async function locate(panel, path) {
@@ -2750,145 +2701,47 @@ function invalidatePlan(panel) {
 
 function setBusy(panel, busy) {
   panel.$.assetScanButton.disabled = busy;
+  panel.$.overviewRunScanButton.disabled = busy;
+  panel.$.overviewRunHealthButton.disabled = busy;
+  panel.$.overviewExportReportButton.disabled = busy;
   panel.$.referenceSelectedAssetButton.disabled = busy;
   panel.$.referenceCheckButton.disabled = busy;
   panel.$.nodeReferenceCheckButton.disabled = busy;
+  panel.$.nodeReferenceTileLayoutButton.disabled = busy;
+  panel.$.nodeReferenceMaxLeftButton.disabled = busy;
+  panel.$.nodeReferenceMaxRightButton.disabled = busy;
   panel.$.unusedScanButton.disabled = busy;
   panel.$.unusedSelectVisibleButton.disabled = busy || getVisibleUnusedCandidates(panel).length === 0;
   panel.$.unusedClearSelectionButton.disabled = busy || unusedSelectedPaths.size === 0;
   panel.$.unusedDeletePreviewButton.disabled = busy;
   panel.$.unusedDeleteExecuteButton.disabled = busy || !unusedDeletePlan || !panel.$.unusedDeleteConfirmedInput.checked || safeNumber(unusedDeletePlan.summary?.ready) <= 0;
   panel.$.resourcesRuntimeCheckButton.disabled = busy;
+  panel.$.resourcesRuntimeTileLayoutButton.disabled = busy;
+  panel.$.resourcesRuntimeMaxLeftButton.disabled = busy;
+  panel.$.resourcesRuntimeMaxRightButton.disabled = busy;
   panel.$.packageSizeReportButton.disabled = busy;
+  panel.$.packageSizeTileLayoutButton.disabled = busy;
+  panel.$.packageSizeMaxStatsButton.disabled = busy;
+  panel.$.packageSizeMaxReferencedButton.disabled = busy;
   panel.$.directoryConventionCheckButton.disabled = busy;
   panel.$.directoryConventionPreviewButton.disabled = busy || directoryConventionMismatches.length === 0;
   panel.$.materialTextureCheckButton.disabled = busy;
   panel.$.duplicateAssetCheckButton.disabled = busy;
+  panel.$.duplicateAssetTileLayoutButton.disabled = busy;
+  panel.$.duplicateAssetMaxLeftButton.disabled = busy;
+  panel.$.duplicateAssetMaxRightButton.disabled = busy;
   panel.$.scenePrefabHealthCheckButton.disabled = busy;
   panel.$.exportSessionReportButton.disabled = busy;
+  panel.$.projectCacheReloadStrategySelect.disabled = busy;
+  panel.$.projectCacheCleanButton.disabled = busy;
   panel.$.scanButton.disabled = busy;
   panel.$.previewButton.disabled = busy;
   panel.$.reverseButton.disabled = busy;
   panel.$.historyDetailButton.disabled = busy || history.length === 0;
   panel.$.saveRulesButton.disabled = busy;
-  panel.$.executeButton.disabled = busy || !currentPlan || currentPlan.summary.ready <= 0;
+  panel.$.executeButton.disabled = busy || !canExecuteMovePlan(currentPlan);
 }
 
 function setStatus(panel, text) {
   panel.$.statusText.textContent = text;
 }
-
-function isCompleteAssetScanResult(result) {
-  const summary = result?.summary;
-  return (
-    !!summary &&
-    Array.isArray(result.entries) &&
-    Array.isArray(result.issues) &&
-    Array.isArray(result.typeStats) &&
-    ["fileCount", "directoryCount", "totalSize", "emptyDirectoryCount", "ignoredIssueCount", "visibleIssueCount", "typeCount"].every((key) => Number.isFinite(Number(summary[key])))
-  );
-}
-
-function isCompleteReferenceResult(result) {
-  const summary = result?.summary;
-  return (
-    !!summary &&
-    Array.isArray(result.targets) &&
-    Array.isArray(result.references) &&
-      ["targetCount", "uuidCount", "scannedFileCount", "referenceFileCount", "totalMatchCount"].every((key) => Number.isFinite(Number(summary[key])))
-  );
-}
-
-function isCompleteNodeReferenceResult(result) {
-  const summary = result?.summary;
-  return (
-    !!summary &&
-    Array.isArray(result.targetNodes) &&
-    Array.isArray(result.references) &&
-    ["scannedFileCount", "targetFileCount", "targetNodeCount", "referenceFileCount", "referencePositionCount", "selectablePositionCount"]
-      .every((key) => Number.isFinite(Number(summary[key])))
-  );
-}
-
-function isCompleteUnusedResult(result) {
-  const summary = result?.summary;
-  return (
-    !!summary &&
-    Array.isArray(result.candidates) &&
-    Array.isArray(result.protectedExtensions) &&
-    ["scannedCount", "reachableCount", "candidateCount", "candidateTotalSize", "protectedCount", "ignoredCount", "unresolvedReferenceCount"]
-      .every((key) => Number.isFinite(Number(summary[key])))
-  );
-}
-
-function isCompleteResourcesRuntimeResult(result) {
-  const summary = result?.summary;
-  return (
-    !!summary &&
-    Array.isArray(result.resources) &&
-    Array.isArray(result.staticCalls) &&
-    Array.isArray(result.unusedResources) &&
-    Array.isArray(result.missingCalls) &&
-    Array.isArray(result.dynamicCalls) &&
-    ["resourceCount", "usedResourceCount", "unusedResourceCount", "scannedCodeFileCount", "staticCallCount", "matchedCallCount", "missingCallCount", "dynamicCallCount"]
-      .every((key) => Number.isFinite(Number(summary[key])))
-  );
-}
-
-function isCompletePackageSizeResult(result) {
-  const summary = result?.summary;
-  return (
-    !!summary &&
-    Array.isArray(result.directoryRanking) &&
-    Array.isArray(result.typeRanking) &&
-    Array.isArray(result.topFiles) &&
-    Array.isArray(result.referencedTopFiles) &&
-    ["topN", "fileCount", "totalSize", "directoryCount", "typeCount", "excludedMetaCount", "excludedMetaSize", "referencedFileCount", "referencedTotalSize", "unresolvedReferenceCount"]
-      .every((key) => Number.isFinite(Number(summary[key])))
-  );
-}
-
-function isCompleteDirectoryConventionResult(result) {
-  const summary = result?.summary;
-  return (
-    !!summary &&
-    Array.isArray(result.mismatches) &&
-    ["fileCount", "ruleCount", "matchedCount", "compliantCount", "mismatchCount", "unmatchedCount", "missingMetaCount"]
-      .every((key) => Number.isFinite(Number(summary[key])))
-  );
-}
-
-function isCompleteMaterialTextureResult(result) {
-  const summary = result?.summary;
-  return (
-    !!summary &&
-    Array.isArray(result.references) &&
-    Array.isArray(result.materialExtensions) &&
-    ["materialCount", "reachableMaterialCount", "unreachableMaterialCount", "textureReferenceCount", "resolvedReferenceCount", "reviewReferenceCount", "noTextureMaterialCount", "invalidMaterialCount"]
-      .every((key) => Number.isFinite(Number(summary[key])))
-  );
-}
-
-function isCompleteDuplicateAssetResult(result) {
-  const summary = result?.summary;
-  return (
-    !!summary &&
-    Array.isArray(result.sameNameGroups) &&
-    Array.isArray(result.duplicateHashGroups) &&
-    ["fileCount", "hashCandidateCount", "sameNameGroupCount", "sameNameFileCount", "duplicateHashGroupCount", "duplicateHashFileCount", "duplicateBytes"]
-      .every((key) => Number.isFinite(Number(summary[key])))
-  );
-}
-
-function isCompleteScenePrefabReferenceHealthResult(result) {
-  const summary = result?.summary;
-  return (
-    !!summary &&
-    Array.isArray(result.issues) &&
-    Array.isArray(result.whitelist) &&
-    Array.isArray(result.extensions) &&
-    ["scannedFileCount", "referenceCount", "resolvedReferenceCount", "whitelistReferenceCount", "unresolvedReferenceCount", "unresolvedUuidCount", "affectedFileCount"]
-      .every((key) => Number.isFinite(Number(summary[key])))
-  );
-}
-

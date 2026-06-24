@@ -28,6 +28,7 @@ const MovePlan = require("./main/move-plan");
 const Report = require("./main/report");
 const UnusedDelete = require("./main/unused-delete");
 const HealthChecks = require("./main/health-checks");
+const ProjectMaintenance = require("./main/project-maintenance");
 const PACKAGE_VERSION = require("./package.json").version;
 
 const PACKAGE_NAME = "asset-steward";
@@ -279,6 +280,10 @@ exports.methods = {
 
   async executeUnusedDelete(payload) {
     return withProtocol(() => executeUnusedDelete(payload));
+  },
+
+  cleanProjectCache(payload) {
+    return withProtocol(() => cleanProjectCache(payload));
   },
 
   getToolboxFramework() {
@@ -547,6 +552,10 @@ async function executeUnusedDelete(payload) {
   return result;
 }
 
+function cleanProjectCache(payload) {
+  return ProjectMaintenance.cleanProjectCache(payload);
+}
+
 function validateUnusedDeletePlanStillCurrent(plan) {
   return UnusedDelete.validateUnusedDeletePlanStillCurrent(plan);
 }
@@ -637,6 +646,7 @@ exports._test = {
   scanUnusedAssets,
   buildUnusedDeletePlan,
   executeUnusedDelete,
+  cleanProjectCache,
   createUnusedDeleteBackup,
   writeUnusedDeleteExecutionAudit,
   collectUnusedDeleteBackupFiles,
@@ -653,6 +663,10 @@ exports._test = {
   extractGraphUuids: ReferenceGraph.extractGraphUuids,
   getToolboxFramework,
   normalizeTopN: HealthChecks.normalizeTopN,
+  normalizeCacheDirectories: ProjectMaintenance.normalizeCacheDirectories,
+  normalizeReloadStrategy: ProjectMaintenance.normalizeReloadStrategy,
+  resolveProjectCacheDirectory: ProjectMaintenance.resolveProjectCacheDirectory,
+  collectDirectoryStats: ProjectMaintenance.collectDirectoryStats,
   extractResourcesRuntimeCalls,
   parseStaticStringExpression,
   resourceMatchesRuntimeCall,
