@@ -373,6 +373,39 @@ test("selected asset path resolves current asset selection for reference checks"
   }
 });
 
+test("node reference check can prefer current node selection over typed id", () => {
+  resetDirectory("assets/node-reference-selection");
+  writeJson("assets/node-reference-selection/main.scene", [{
+    __type__: "cc.Node",
+    _name: "Old",
+    _id: "old-node",
+    _components: []
+  }, {
+    __type__: "cc.Node",
+    _name: "New",
+    _id: "new-node",
+    _components: []
+  }]);
+
+  const originalGetSelected = global.Editor.Selection.getSelected;
+  global.Editor.Selection.getSelected = (type) => type === "node" ? ["new-node"] : [];
+
+  try {
+    const result = core.checkNodeReferences({
+      nodeUuid: "old-node",
+      directory: "assets/node-reference-selection",
+      extensions: ".scene",
+      preferSelectedNode: true
+    });
+
+    assert.equal(result.nodeUuid, "new-node");
+    assert.deepEqual(result.targetNodes.map((item) => item.nodeUuid), ["new-node"]);
+    assert.equal(result.targetNodes[0].nodePath, "New");
+  } finally {
+    global.Editor.Selection.getSelected = originalGetSelected;
+  }
+});
+
 test("unused delete backup manifest records hashes and execution audit", () => {
   writeDirectoryAsset("assets/res");
   writeAsset("assets/res/unused.png", "unused-content");

@@ -2011,6 +2011,20 @@ test("panel scan renderers fill scan and reference tables", () => {
 });
 
 test("panel node reference helpers build target and reference rows", () => {
+  const nodeUuidInput = { value: "old-node" };
+  assert.deepEqual(nodeReference.buildNodeReferenceCheckPayload({
+    nodeUuidInput,
+    directoryInput: { value: "assets/scene" },
+    extensionInput: { value: ".scene" }
+  }), {
+    nodeUuid: "old-node",
+    directory: "assets/scene",
+    extensions: ".scene",
+    preferSelectedNode: true
+  });
+  nodeReference.syncNodeReferenceUuidInput(nodeUuidInput, { nodeUuid: "new-node" });
+  assert.equal(nodeUuidInput.value, "new-node");
+
   assert.equal(nodeReference.formatNodeReferenceSummary({
     scanDirectory: "assets",
     scannedFileCount: 3,

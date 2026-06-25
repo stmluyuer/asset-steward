@@ -198,7 +198,9 @@ function collectSerializedReferenceDetails(text, extension, uuidToTargets) {
 }
 
 function checkNodeReferences(payload) {
-  const nodeUuid = normalizeNodeReferenceUuid(payload?.nodeUuid || payload?.uuid);
+  const nodeUuid = normalizeNodeReferenceUuid(payload?.nodeUuid || payload?.uuid, {
+    preferSelectedNode: payload?.preferSelectedNode === true
+  });
   const scanDirectory = normalizeScanDirectory(payload?.directory || payload?.scanDirectory || "assets");
   const referenceExtensions = normalizeNodeReferenceExtensions(payload?.extensions || payload?.referenceExtensions);
   const references = [];
@@ -391,16 +393,26 @@ function normalizeNodeReferenceFieldPath(path, object) {
   return normalizeReferenceFieldPath(String(path || "").replace(/\.__id__$/, ""), object);
 }
 
-function normalizeNodeReferenceUuid(value) {
-  let nodeUuid = String(value || "").trim();
-  if (!nodeUuid && typeof Editor !== "undefined") {
-    const selected = Editor.Selection?.getSelected?.("node") || [];
-    nodeUuid = String(selected[0] || "").trim();
+function normalizeNodeReferenceUuid(value, options = {}) {
+  let nodeUuid = options.preferSelectedNode ? getSelectedNodeUuid() : "";
+  if (!nodeUuid) {
+    nodeUuid = String(value || "").trim();
+  }
+  if (!nodeUuid) {
+    nodeUuid = getSelectedNodeUuid();
   }
   if (!nodeUuid) {
     throw new Error("请先在场景中选中节点，或手动输入目标节点 ID。");
   }
   return nodeUuid;
+}
+
+function getSelectedNodeUuid() {
+  if (typeof Editor === "undefined") {
+    return "";
+  }
+  const selected = Editor.Selection?.getSelected?.("node") || [];
+  return String(selected[0] || "").trim();
 }
 
 function normalizeNodeReferenceExtensions(value) {

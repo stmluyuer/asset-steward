@@ -97,6 +97,10 @@ const {
   renderNodeReferences: renderNodeReferencesView,
 } = require("./render/node-reference");
 const {
+  buildNodeReferenceCheckPayload,
+  syncNodeReferenceUuidInput,
+} = require("./node-reference");
+const {
   clearClassifySelection,
   filterSelectedPathsByEntries,
   formatClassifyScanSummary,
@@ -1865,19 +1869,16 @@ async function checkNodeReferences(panel) {
   setBusy(panel, true);
   setStatus(panel, "正在检查场景节点被哪些组件引用...");
   try {
-    const result = await requestMain("check-node-references", {
-      nodeUuid: panel.$.nodeReferenceUuidInput.value,
-      directory: panel.$.nodeReferenceDirectoryInput.value,
-      extensions: panel.$.nodeReferenceExtensionInput.value
-    });
+    const result = await requestMain("check-node-references", buildNodeReferenceCheckPayload({
+      nodeUuidInput: panel.$.nodeReferenceUuidInput,
+      directoryInput: panel.$.nodeReferenceDirectoryInput,
+      extensionInput: panel.$.nodeReferenceExtensionInput
+    }));
     ({
       nodeReferenceTargets,
       nodeReferenceRows,
       nodeReferenceSummary
     } = buildNodeReferenceResultState(result));
-    if (result.nodeUuid && !panel.$.nodeReferenceUuidInput.value.trim()) {
-      panel.$.nodeReferenceUuidInput.value = result.nodeUuid;
-    }
     if (!isCompleteNodeReferenceResult(result)) {
       const message = "节点引用检查接口返回旧结构或字段不完整。请重载 asset-steward 后重新检查。";
       resetNodeReferenceResult();
@@ -1886,6 +1887,7 @@ async function checkNodeReferences(panel) {
       setStatus(panel, message);
       return;
     }
+    syncNodeReferenceUuidInput(panel.$.nodeReferenceUuidInput, result);
     renderNodeReferences(panel);
     await addLog(panel, nodeReferenceRows.length ? "info" : "warning", result.warning || "节点引用检查完成。");
     setStatus(panel, result.warning || "节点引用检查完成。");

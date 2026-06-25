@@ -48,8 +48,26 @@ function buildNodeReferenceRows(references) {
   return rows;
 }
 
+function buildNodeReferenceCheckPayload(fields = {}) {
+  return {
+    nodeUuid: String(fields.nodeUuidInput?.value || "").trim(),
+    directory: fields.directoryInput?.value || "",
+    extensions: fields.extensionInput?.value || "",
+    preferSelectedNode: true
+  };
+}
+
+function syncNodeReferenceUuidInput(input, result) {
+  const nodeUuid = String(result?.nodeUuid || "").trim();
+  if (input && nodeUuid) {
+    input.value = nodeUuid;
+  }
+}
+
 module.exports = {
   formatNodeReferenceSummary,
   buildNodeReferenceTargetRows,
-  buildNodeReferenceRows
+  buildNodeReferenceRows,
+  buildNodeReferenceCheckPayload,
+  syncNodeReferenceUuidInput
 };
