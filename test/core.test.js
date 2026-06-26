@@ -350,6 +350,40 @@ test("reference check keeps legacy details and target paths fields", () => {
   assert.equal(result.references[0].details[0].nodePath, "Root");
 });
 
+test("reference check resolves script component references from script meta uuid", () => {
+  resetDirectory("assets/script-reference");
+  const scriptUuid = "12345678-1234-4234-8234-123456789abc";
+  const compressedType = referenceGraph.compressCocosUuid(scriptUuid, true);
+  writeFile("assets/script-reference/FishController.ts", "export class FishController {}");
+  writeJson("assets/script-reference/FishController.ts.meta", { uuid: scriptUuid });
+  writeJson("assets/script-reference/holder.prefab", [{
+    __type__: "cc.Node",
+    _name: "Root",
+    _id: "node-root",
+    _components: [{ __id__: 1 }]
+  }, {
+    __type__: compressedType,
+    _node: { __id__: 0 },
+    speed: 10
+  }]);
+  writeJson("assets/script-reference/holder.prefab.meta", { uuid: "22222222-2222-4222-8222-222222222222" });
+
+  const result = core.checkReferences({
+    paths: ["assets/script-reference/FishController.ts"],
+    directory: "assets/script-reference",
+    extensions: ".prefab"
+  });
+
+  assert.equal(result.references.length, 1);
+  assert.equal(result.references[0].matchCount, 1);
+  assert.deepEqual(result.references[0].matchedUuids, [scriptUuid]);
+  assert.deepEqual(result.references[0].targetPaths, ["assets/script-reference/FishController.ts"]);
+  assert.equal(result.references[0].details[0].matchedUuid, scriptUuid);
+  assert.equal(result.references[0].details[0].fieldPath, "__type__");
+  assert.equal(result.references[0].details[0].nodePath, "Root");
+  assert.equal(result.references[0].details[0].referenceKind, "script-component");
+});
+
 test("selected asset path resolves current asset selection for reference checks", async () => {
   writeAsset("assets/reference/selected.png", "selected");
 

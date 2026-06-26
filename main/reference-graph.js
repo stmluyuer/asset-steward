@@ -21,6 +21,9 @@ const DEFAULT_REFERENCE_EXTENSIONS = [".scene", ".prefab", ".mtl", ".material", 
 const DEFAULT_NODE_REFERENCE_EXTENSIONS = [".scene", ".prefab"];
 const DEFAULT_CODE_SCAN_DIRECTORIES = ["assets/script", "assets/scripts"];
 const CODE_EXTENSIONS = new Set([".ts", ".js"]);
+const SCRIPT_REFERENCE_EXTENSIONS = new Set([".scene", ".prefab"]);
+const BASE64_KEY_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+const BASE64_VALUES = new Map([...BASE64_KEY_CHARS].map((char, index) => [char, index]));
 const GRAPH_UUID_PATTERN = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?:@[0-9a-z_-]+)?/gi;
 const GRAPH_TEXT_EXTENSIONS = new Set([
   ".anim",
@@ -53,12 +56,18 @@ function checkReferences(payload) {
   const referenceExtensions = normalizeReferenceExtensions(payload?.extensions || payload?.referenceExtensions);
   const targetItems = targetPaths.map((path) => collectTargetUuids(path));
   const uuidToTargets = new Map();
+  const uuidToNeedles = new Map();
+  const scriptUuids = new Set();
 
   for (const target of targetItems) {
     for (const uuid of target.uuids) {
       const targets = uuidToTargets.get(uuid) || [];
       targets.push(target.path);
       uuidToTargets.set(uuid, targets);
+      uuidToNeedles.set(uuid, collectReferenceNeedles(uuid));
+      if (target.script) {
+        scriptUuids.add(uuid);
+      }
     }
   }
 
@@ -78,17 +87,28 @@ function checkReferences(payload) {
 
     scannedFileCount++;
     const text = Fs.readFileSync(fullPath, "utf8");
-    const matchedUuids = [];
+    const matchedUuidSet = new Set();
+    const textMatchedUuidSet = new Set();
     let matchCount = 0;
-    for (const uuid of uuidToTargets.keys()) {
-      const count = countTextOccurrences(text, uuid);
+    for (const [uuid, needles] of uuidToNeedles) {
+      const count = countNeedleOccurrences(text, needles);
       if (count > 0) {
-        matchedUuids.push(uuid);
+        matchedUuidSet.add(uuid);
+        textMatchedUuidSet.add(uuid);
         matchCount += count;
       }
     }
+    const details = collectSerializedReferenceDetails(text, extension, uuidToTargets, {
+      scriptUuids: SCRIPT_REFERENCE_EXTENSIONS.has(extension) ? scriptUuids : new Set()
+    });
+    for (const detail of details) {
+      matchedUuidSet.add(detail.matchedUuid);
+      if (detail.referenceKind === "script-component" && !textMatchedUuidSet.has(detail.matchedUuid)) {
+        matchCount++;
+      }
+    }
     if (matchCount > 0) {
-      const details = collectSerializedReferenceDetails(text, extension, uuidToTargets);
+      const matchedUuids = [...matchedUuidSet].sort(comparePath);
       references.push({
         path: relative,
         extension,
@@ -128,7 +148,7 @@ function checkReferences(payload) {
   };
 }
 
-function collectSerializedReferenceDetails(text, extension, uuidToTargets) {
+function collectSerializedReferenceDetails(text, extension, uuidToTargets, options = {}) {
   if (extension !== ".scene" && extension !== ".prefab") {
     return [];
   }
@@ -162,6 +182,7 @@ function collectSerializedReferenceDetails(text, extension, uuidToTargets) {
 
   const nodePathCache = new Map();
   const details = [];
+  const scriptUuids = options.scriptUuids instanceof Set ? options.scriptUuids : new Set();
   objects.forEach((object, objectIndex) => {
     if (!object || typeof object !== "object") {
       return;
@@ -187,6 +208,25 @@ function collectSerializedReferenceDetails(text, extension, uuidToTargets) {
         selectable: Boolean(node?._id)
       });
     });
+    if (scriptUuids.size > 0 && isSerializedComponentLikeObject(object)) {
+      const scriptUuid = normalizeScriptTypeUuid(object.__type__);
+      const targetPaths = uuidToTargets.get(scriptUuid);
+      if (targetPaths) {
+        details.push({
+          matchedUuid: scriptUuid,
+          targetPaths: [...targetPaths].sort(comparePath),
+          objectIndex,
+          fieldPath: "__type__",
+          componentType: resolveSerializedTypeName(object.__type__),
+          componentTypeId: object.__type__ || "",
+          nodeName: node?._name || "",
+          nodePath,
+          nodeUuid: typeof node?._id === "string" ? node._id : "",
+          selectable: Boolean(node?._id),
+          referenceKind: "script-component"
+        });
+      }
+    }
   });
 
   return details.sort((left, right) =>
@@ -466,6 +506,97 @@ function resolveSerializedTypeName(type) {
   }
 }
 
+function normalizeScriptTypeUuid(type) {
+  const value = String(type || "").trim();
+  if (!value || value.startsWith("cc.")) {
+    return "";
+  }
+  const direct = extractUuids(value)[0];
+  if (direct) {
+    return direct;
+  }
+  try {
+    if (typeof Editor !== "undefined") {
+      const uuid = Editor.Utils?.UUID?.decompressUUID?.(value);
+      if (uuid) {
+        return String(uuid).toLowerCase();
+      }
+    }
+  } catch (_error) {
+    // Fall back to the local Cocos UUID codec below.
+  }
+  return decompressCocosUuid(value);
+}
+
+function collectReferenceNeedles(uuid, includeScriptTypeIds = false) {
+  const needles = new Set([uuid]);
+  if (includeScriptTypeIds) {
+    for (const typeId of collectScriptTypeIds(uuid)) {
+      needles.add(typeId);
+    }
+  }
+  return [...needles].filter(Boolean);
+}
+
+function collectScriptTypeIds(uuid) {
+  const result = new Set();
+  try {
+    if (typeof Editor !== "undefined") {
+      const compress = Editor.Utils?.UUID?.compressUUID;
+      if (typeof compress === "function") {
+        result.add(compress(uuid, true));
+        result.add(compress(uuid, false));
+        result.add(compress(uuid));
+      }
+    }
+  } catch (_error) {
+    // The pure fallback below keeps unit tests and non-editor use working.
+  }
+  result.add(compressCocosUuid(uuid, true));
+  result.add(compressCocosUuid(uuid, false));
+  return [...result].filter(Boolean);
+}
+
+function compressCocosUuid(uuid, min = true) {
+  const hex = String(uuid || "").replace(/-/g, "").toLowerCase();
+  if (!/^[0-9a-f]{32}$/.test(hex)) {
+    return "";
+  }
+  const reserved = min ? 2 : 5;
+  let result = hex.slice(0, reserved);
+  for (let index = reserved; index < 32; index += 3) {
+    const left = parseInt(hex[index], 16);
+    const middle = parseInt(hex[index + 1], 16);
+    const right = parseInt(hex[index + 2], 16);
+    result += BASE64_KEY_CHARS[(left << 2) | (middle >> 2)];
+    result += BASE64_KEY_CHARS[((middle & 3) << 4) | right];
+  }
+  return result;
+}
+
+function decompressCocosUuid(value) {
+  const text = String(value || "").trim();
+  if (text.length !== 22 && text.length !== 23) {
+    return "";
+  }
+  const reserved = text.length === 22 ? 2 : 5;
+  let hex = text.slice(0, reserved).toLowerCase();
+  for (let index = reserved; index < text.length; index += 2) {
+    const left = BASE64_VALUES.get(text[index]);
+    const right = BASE64_VALUES.get(text[index + 1]);
+    if (!Number.isInteger(left) || !Number.isInteger(right)) {
+      return "";
+    }
+    hex += ((left >> 2) & 0xf).toString(16);
+    hex += (((left & 0x3) << 2) | (right >> 4)).toString(16);
+    hex += (right & 0xf).toString(16);
+  }
+  if (!/^[0-9a-f]{32}$/.test(hex)) {
+    return "";
+  }
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 function getScriptTypeNames() {
   if (scriptTypeNameCache) {
     return scriptTypeNameCache;
@@ -561,7 +692,8 @@ function collectTargetUuids(path) {
     path,
     metaPath,
     uuids,
-    uuidCount: uuids.length
+    uuidCount: uuids.length,
+    script: CODE_EXTENSIONS.has(Path.extname(path).toLowerCase())
   };
 }
 
@@ -582,6 +714,28 @@ function countTextOccurrences(text, needle) {
   while ((index = lowerText.indexOf(lowerNeedle, index)) >= 0) {
     count++;
     index += lowerNeedle.length;
+  }
+  return count;
+}
+
+function countNeedleOccurrences(text, needles) {
+  const matchedRanges = [];
+  let count = 0;
+  const lowerText = String(text || "").toLowerCase();
+  for (const needle of needles) {
+    const lowerNeedle = String(needle || "").toLowerCase();
+    if (!lowerNeedle) {
+      continue;
+    }
+    let index = 0;
+    while ((index = lowerText.indexOf(lowerNeedle, index)) >= 0) {
+      const end = index + lowerNeedle.length;
+      if (!matchedRanges.some((range) => index < range.end && end > range.start)) {
+        matchedRanges.push({ start: index, end });
+        count++;
+      }
+      index = end;
+    }
   }
   return count;
 }
@@ -743,6 +897,11 @@ module.exports = {
   walkSerializedReferenceValues,
   normalizeReferenceFieldPath,
   resolveSerializedTypeName,
+  normalizeScriptTypeUuid,
+  collectReferenceNeedles,
+  collectScriptTypeIds,
+  compressCocosUuid,
+  decompressCocosUuid,
   getScriptTypeNames,
   resolveReferenceNodeIndex,
   buildSerializedNodePath,
@@ -750,6 +909,7 @@ module.exports = {
   collectTargetUuids,
   extractUuids,
   countTextOccurrences,
+  countNeedleOccurrences,
   normalizeScenePath,
   buildSerializedAssetGraph,
   collectReachableAssetChains,
