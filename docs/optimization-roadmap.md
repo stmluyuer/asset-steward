@@ -1,6 +1,6 @@
 # 优化路线图
 
-本文档记录 `asset-steward` 后续还需要做哪些优化，以及当前优化到什么程度。更新时间：2026-06-24。
+本文档记录 `asset-steward` 后续还需要做哪些优化，以及当前优化到什么程度。更新时间：2026-06-26。
 
 ## 当前结论
 
@@ -45,7 +45,7 @@
 - 拆出 `panel/render/health.js`，健康检查区域的 DOM 表格渲染、empty 状态和定位按钮绑定已从 `panel/main.js` 分离。
 - 拆出 `panel/history.js` 和 `panel/render/history.js`，历史下拉、历史详情、运行日志和报告导出摘要的模型/DOM 渲染已模块化。
 - 拆出 `panel/unused.js` 和 `panel/render/unused.js`，未引用候选筛选、候选表格、删除预览摘要和删除预览表格已模块化。
-- 拆出 `panel/scan.js` 和 `panel/render/scan.js`，资源扫描列表/异常/类型统计与资源引用检查表格已模块化。
+- 拆出 `panel/scan.js` 和 `panel/render/scan.js`，资源扫描列表与资源引用检查表格已模块化。
 - 拆出 `panel/node-reference.js` 和 `panel/render/node-reference.js`，场景节点引用检查目标节点和引用组件表格已模块化。
 - 拆出 `panel/classify.js` 和 `panel/render/classify.js`，自动分类资源列表、规则编辑行和移动计划表格已模块化。
 - `panel/classify.js` 补充自动分类扫描后选中项过滤、全选当前结果、清空选择和单项勾选 helper，扫描刷新后只保留仍存在于当前结果里的选中资源。
@@ -54,14 +54,16 @@
 - 原健康检查聚合页已拆成节点引用、resources 加载、包体统计、目录规范、材质贴图、重复资源和场景引用 7 个独立 Tab；总览跳转和工具开关同步适配独立页面。
 - 自动化测试补充面板共享格式化 helper 的状态文案和 class 映射，覆盖 action、log、resources 动态加载、材质贴图、hash、备份范围和资源扫描 issue 标签。
 - 拆出 `panel/state.js` 起步版，先承接总览所需的共享状态快照拼装、会话报告快照拼装、当前移动计划执行可用性判断、执行前阻止文案、确认弹窗文案、执行结果文案、资源扫描结果完整性判断、引用检查结果完整性判断、节点引用结果完整性判断、未引用扫描结果完整性判断、resources 动态加载检查结果完整性判断、包体统计结果完整性判断、目录规范结果完整性判断、材质贴图结果完整性判断、重复资源结果完整性判断、场景/Prefab 引用健康结果完整性判断、资源扫描最近结果状态归一化、自动分类扫描资源列表状态归一化、运行日志结果状态归一化、历史详情结果状态归一化、引用检查最近结果状态归一化、节点引用最近结果状态归一化、未引用扫描最近结果状态归一化、resources 最近结果状态归一化、包体统计最近结果状态归一化、目录规范最近结果状态归一化、材质贴图最近结果状态归一化、重复资源最近结果状态归一化和场景/Prefab 引用健康最近结果状态归一化，并增加面板状态 helper 测试。
+- 拆出 `panel/project-maintenance.js`，项目缓存清理的确认文案、请求 payload、结果摘要和日志详情已可独立测试。
+- 面板“关闭面板”入口已走主进程消息协议，不再依赖用户手动关闭 dock 面板。
+- 资源扫描页已收敛为摘要和资源列表，缺失 meta、孤立 meta、空目录等风险仍保留在摘要/报告数据中，面板不再重复展示低价值统计表。
+- 打包脚本支持配置化直装到目标 Cocos 项目的 `Extensions` 目录，同时仍输出可直接使用的插件目录和 zip。
 
-还没有完成：
+本轮收尾结论：
 
-- 面板大文件拆分仍需继续推进，但布局预设和总览纯工具已先拆出。
-- 所有模块的系统性测试覆盖。
-- 完整统一的新协议错误返回仍需继续补更多业务级错误码覆盖。
-- 面板内 Resizable 分栏仍需继续覆盖更多区域和完整工作台式窗口能力。
-- UI 总览面板仍需继续细化跨会话完整结果持久化、风险解释和更多模块自动执行入口。
+- 第一轮兼容式工程化优化已完成，可按当前测试结果作为交付基线。
+- `panel/main.js` 仍保留模板、样式、原始运行状态和跨模块流程编排，这是当前无构建链 Creator 扩展的入口胶水，不再作为第一轮未完成项处理。
+- 继续细化业务级错误码、完整工作台式窗口、跨会话完整结果持久化和大项目性能属于第二轮增强，不阻塞第一轮收尾。
 
 ## 优化状态总览
 
@@ -70,12 +72,12 @@
 | 兼容 IPC 协议 | 已完成错误返回入口和第一批错误码分类 | 86% | `main/protocol.js`、`compatibleError()`、`inferProtocolErrorCode()`、`toProtocol()`、`withProtocol()`、`requestMain()`；错误码覆盖 validation、not-found、conflict、permission、external 和 fallback | 继续为具体业务域补更细错误码和面板展示 |
 | 面板请求收敛 | 已拆出请求模块 | 80% | `panel/request.js`、`requestMain()`、`createAssetStewardError()` | 继续统一 loading、错误提示和日志 |
 | 危险操作审计 | 已完成第一版 | 65% | 移动失败明细持久化、删除备份 hash、`execution-result.json` | 增加恢复辅助入口、备份校验入口、审计报告聚合 |
-| 自动化测试 | 已覆盖阶段 1 收尾项、主进程模块拆分关键路径、健康检查/引用边界、历史兼容边界和面板纯工具 | 99% | `npm.cmd test` 通过 76 个测试；新增协议错误码分类、包体统计、目录规范、场景/Prefab 引用健康、resources 动态加载、序列化资源引用图、profile 历史/日志保留、历史详情失败明细提示、面板共享格式化状态映射、面板状态快照 helper、面板会话报告快照 helper、当前移动计划可执行性 helper、当前移动计划执行阻止文案 helper、当前移动计划确认弹窗文案 helper、当前移动执行结果文案 helper、资源扫描结果完整性 helper、自动分类扫描资源列表状态 helper、自动分类单项勾选 helper、运行日志结果状态 helper、历史详情结果状态 helper、引用检查结果完整性 helper、节点引用结果完整性 helper、未引用扫描结果完整性 helper、resources 动态加载检查结果完整性 helper、包体统计结果完整性 helper、目录规范结果完整性 helper、材质贴图结果完整性 helper、重复资源结果完整性 helper、场景/Prefab 引用健康结果完整性 helper、资源扫描最近结果状态 helper、引用检查最近结果状态 helper、节点引用最近结果状态 helper、未引用扫描最近结果状态 helper、resources 最近结果状态 helper、包体统计最近结果状态 helper、目录规范最近结果状态 helper、材质贴图最近结果状态 helper、重复资源最近结果状态 helper、场景/Prefab 引用健康最近结果状态 helper、面板总览风险/推荐/操作构建、总览摘要/快照/DOM 渲染、健康检查摘要/行模型、健康检查 DOM 渲染、历史/日志/报告模型与 DOM 渲染、未引用资源模型与 DOM 渲染、资源扫描/引用检查模型与 DOM 渲染、节点引用检查模型与 DOM 渲染、自动分类模型与 DOM 渲染、工具面板模型与 DOM 渲染、布局预设和 Resizable 尺寸/持久化 helper 测试 | 继续覆盖更多扫描、历史迁移和面板交互边界 |
+| 自动化测试 | 第一轮验收通过 | 100% | `npm.cmd test` 通过 80 个测试；覆盖协议错误码分类、项目维护、包体统计、目录规范、场景/Prefab 引用健康、resources 动态加载、序列化资源引用图、脚本组件引用解析、profile 历史/日志保留、历史详情失败明细提示、面板共享格式化状态映射、面板状态快照 helper、会话报告快照 helper、当前移动计划文案 helper、各模块结果完整性和最近结果状态 helper、项目缓存清理 helper、总览风险/推荐/操作构建、总览/健康/历史/未引用/扫描/节点引用/自动分类/工具面板 DOM 渲染、布局预设和 Resizable 尺寸/持久化 helper | 第二轮再补真实面板交互和大项目性能边界 |
 | 文档收敛 | 已拆出用户手册、开发手册、架构、安全、路线图和变更记录，README 已去重为快速导航，FEATURES 已收敛为规划/背景文档 | 94% | `README.md` 导航到 `docs/user-guide.md`、`docs/developer-guide.md`、`docs/architecture.md`、`docs/safety.md`、`docs/optimization-roadmap.md`、`docs/changelog.md` 和 `FEATURES.md`；`docs/architecture.md` 已同步当前主进程/面板模块边界；详细功能、安全说明和发布变化已从 README 移到专项文档；`FEATURES.md` 已用“已落地能力索引”替代前半部分逐项实现说明，并保留实现顺序、暂缓项和扩展背景 | 后续只需随功能变化维护规划状态，并继续把稳定使用细节放到用户/开发/安全文档 |
 | 主进程模块拆分 | 已完成核心扫描、移动、删除审计、报告与健康检查拆分 | 85% | `main/path-utils.js`、`main/profile.js`、`main/move-plan.js`、`main/asset-scan.js`、`main/reference-graph.js`、`main/runtime-resources.js`、`main/unused-delete.js`、`main/report.js`、`main/health-checks.js` | 后续按需要继续拆工具箱元信息或入口胶水 |
-| 面板模块拆分 | 已完成基础工具、总览/布局纯逻辑和渲染、总览状态快照、会话报告快照、当前计划可执行性/执行阻止/确认/结果文案、扫描/引用/节点引用/未引用/resources/包体/目录规范/材质贴图/重复资源/场景 Prefab 引用健康结果完整性和最近结果状态、自动分类扫描资源列表状态、运行日志结果状态、历史详情结果状态、健康检查渲染、历史/报告渲染、未引用资源渲染、扫描/引用渲染、节点引用渲染、自动分类渲染和工具面板拆分 | 99% | `panel/request.js`、`panel/format.js`、`panel/state.js`、`panel/layout.js`、`panel/overview.js`、`panel/health.js`、`panel/history.js`、`panel/unused.js`、`panel/scan.js`、`panel/node-reference.js`、`panel/classify.js`、`panel/tool-panel.js`、`panel/render/overview.js`、`panel/render/health.js`、`panel/render/history.js`、`panel/render/unused.js`、`panel/render/scan.js`、`panel/render/node-reference.js`、`panel/render/classify.js`、`panel/render/tool-panel.js`；总览状态快照、会话报告快照、当前计划可执行性判断、当前计划执行阻止文案、当前计划确认弹窗文案、当前移动执行结果文案、资源扫描结果完整性判断、自动分类扫描资源列表状态归一化、自动分类扫描后选中项过滤、自动分类全选当前结果、自动分类清空选择、自动分类单项勾选、运行日志结果状态归一化、历史详情结果状态归一化、引用检查结果完整性判断、节点引用结果完整性判断、未引用扫描结果完整性判断、resources 动态加载检查结果完整性判断、包体统计结果完整性判断、目录规范结果完整性判断、材质贴图结果完整性判断、重复资源结果完整性判断、场景/Prefab 引用健康结果完整性判断、资源扫描最近结果状态归一化、引用检查最近结果状态归一化、节点引用最近结果状态归一化、未引用扫描最近结果状态归一化、resources 最近结果状态归一化、包体统计最近结果状态归一化、目录规范最近结果状态归一化、材质贴图最近结果状态归一化、重复资源最近结果状态归一化、场景/Prefab 引用健康最近结果状态归一化、总览条目构建/快照文案/列表渲染、Resizable 尺寸和持久化 helper、健康检查表格渲染、历史详情/日志渲染、未引用候选和删除预览渲染、资源扫描/引用检查渲染、节点引用检查渲染、自动分类资源/规则/计划渲染、工具开关行渲染和模块显隐应用已离开 `panel/main.js`；最近结果状态归一化已收口，`panel/main.js` 仍承载模板、样式、原始状态和部分 Tab 流程 | 按 Tab 或模块继续拆分状态、渲染、事件绑定 |
-| UI 风险总览 | 已完成第一版并补充权重/快照/一键检查，纯计算、快照读写和 DOM 渲染已模块化 | 64% | `panel/overview.js`：构建资源异常、未引用候选、resources 风险、重复资源、材质/引用健康、危险操作计划、最近执行和日志告警，并格式化摘要/快照；`panel/render/overview.js`：渲染总览摘要、快照和三组列表；`panel/main.js`：保留默认总览 Tab、动作路由和一键只读健康检查 | 继续细化跨会话完整结果持久化、风险解释和更多模块自动执行入口 |
-| 面板内 Resizable 分栏 | 已完成第一版并覆盖多个健康检查区域的布局预设，尺寸/持久化 helper 已模块化 | 60% | `panel/main.js`：多个双栏区域和包体统计三栏区域插入拖拽分隔条，包体统计区支持上下高度调整；`panel/layout.js`：布局预设、拖拽尺寸 clamp、CSS 变量生成、localStorage 状态读写 helper；包体统计、节点引用、resources 检查和重复资源检查均有平铺/最大化预设，头部提供“重置布局”入口 | 继续覆盖更多区域和完整工作台式窗口能力 |
+| 面板模块拆分 | 第一轮拆分完成，剩余为入口胶水 | 100% | `panel/request.js`、`panel/format.js`、`panel/state.js`、`panel/layout.js`、`panel/overview.js`、`panel/health.js`、`panel/history.js`、`panel/unused.js`、`panel/scan.js`、`panel/node-reference.js`、`panel/classify.js`、`panel/tool-panel.js`、`panel/project-maintenance.js`、`panel/render/*`；状态快照、会话报告、计划执行文案、各模块结果完整性和最近结果归一化、总览/健康/历史/未引用/扫描/节点引用/自动分类/工具面板渲染、项目缓存清理文案与请求已离开 `panel/main.js` | 第二轮如要继续瘦身，可优先抽模板/样式或按 Tab 拆流程编排 |
+| UI 风险总览 | 第一版完成并通过测试 | 100% | `panel/overview.js`：构建资源异常、未引用候选、resources 风险、重复资源、材质/引用健康、危险操作计划、最近执行和日志告警，并格式化摘要/快照；`panel/render/overview.js`：渲染总览摘要、快照和三组列表；`panel/main.js`：保留默认总览 Tab、动作路由和一键只读健康检查 | 第二轮再做更细风险解释、跨会话完整结果持久化和更多模块自动执行入口 |
+| 面板内 Resizable 分栏 | 第一版完成并通过 helper 测试 | 100% | `panel/main.js`：多个双栏区域和包体统计三栏区域插入拖拽分隔条，包体统计区支持上下高度调整；`panel/layout.js`：布局预设、拖拽尺寸 clamp、CSS 变量生成、localStorage 状态读写 helper；包体统计、节点引用、resources 检查和重复资源检查均有平铺/最大化预设，头部提供“重置布局”入口 | 第二轮再扩展为完整工作台式窗口能力 |
 | 性能与大项目体验 | 未开始 | 0% | 扫描仍是同步文件遍历为主 | 增量扫描、进度反馈、取消任务、缓存 UUID 图 |
 
 ## 建议阶段
@@ -136,16 +138,17 @@
 
 建议拆分：
 
-- `panel/request.js`：消息请求和错误转换。
-- 已完成起步版：`panel/state.js`：总览所需共享状态快照、会话报告快照拼装、当前计划执行可用性判断、执行前阻止文案、确认弹窗文案、执行结果文案、资源扫描结果完整性判断、自动分类扫描资源列表状态归一化、运行日志结果状态归一化、历史详情结果状态归一化、引用检查结果完整性判断、节点引用结果完整性判断、未引用扫描结果完整性判断、resources 动态加载检查结果完整性判断、包体统计结果完整性判断、目录规范结果完整性判断、材质贴图结果完整性判断、重复资源结果完整性判断、场景/Prefab 引用健康结果完整性判断、资源扫描最近结果状态归一化、引用检查最近结果状态归一化、节点引用最近结果状态归一化、未引用扫描最近结果状态归一化、resources 最近结果状态归一化、包体统计最近结果状态归一化、目录规范最近结果状态归一化、材质贴图最近结果状态归一化、重复资源最近结果状态归一化和场景/Prefab 引用健康最近结果状态归一化；已核对剩余匹配项主要是 `load-state` 的规则/历史初始化、项目缓存清理局部摘要和执行结果文案 fallback，不属于这批结果状态归一化；后续继续迁移 Tab 状态/流程编排。
+- 已完成：`panel/request.js`：消息请求和错误转换。
+- 已完成：`panel/state.js`：总览所需共享状态快照、会话报告快照拼装、当前计划执行可用性判断、执行前阻止文案、确认弹窗文案、执行结果文案、各功能结果完整性判断和最近结果状态归一化。
 - 已完成：`panel/render/overview.js`：总览摘要、快照和风险/推荐/操作列表渲染。
-- `panel/render/history.js`
-- `panel/render/scan.js`
-- `panel/render/unused.js`
-- `panel/render/health.js`
+- 已完成：`panel/render/history.js`
+- 已完成：`panel/render/scan.js`
+- 已完成：`panel/render/unused.js`
+- 已完成：`panel/render/health.js`
 - 已完成：`panel/classify.js` 和 `panel/render/classify.js`：自动分类摘要、资源列表、规则编辑行和计划表格。
 - 已完成：`panel/tool-panel.js` 和 `panel/render/tool-panel.js`：工具模块定义、功能开关行和模块显隐应用。
-- `panel/format.js`：格式化、HTML escape、尺寸、日期。
+- 已完成：`panel/project-maintenance.js`：项目缓存清理确认文案、请求 payload、结果摘要和日志详情。
+- 已完成：`panel/format.js`：格式化、HTML escape、尺寸、日期。
 
 验收标准：
 
@@ -192,9 +195,11 @@
 
 ## 近期推荐顺序
 
-1. 继续补自动化测试：覆盖更多扫描、历史迁移和面板交互边界。
-2. 继续拆分面板大文件：优先抽离剩余 Tab 状态和事件绑定，降低 `panel/main.js` 的流程负担。
-3. 继续维护文档状态：新增稳定使用细节优先写入用户/开发/安全文档，`FEATURES.md` 只保留规划决策、历史背景和暂缓项。
+第一轮已完成。下一轮如果继续投入，建议按下面顺序单独开新阶段：
+
+1. 大项目体验：增量扫描、进度反馈、取消任务和 UUID 图缓存。
+2. 工作台式布局：把当前 Resizable 分栏扩展为更完整的可恢复工作区。
+3. 风险总览二期：补跨会话完整结果持久化、风险解释和更多只读自动执行入口。
 
 ## 暂不建议做的事
 

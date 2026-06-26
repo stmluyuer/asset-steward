@@ -113,7 +113,7 @@ npm test
 npm run package:plugin
 ```
 
-该命令调用 `scripts/package-cocos-plugin.ps1`。打包前应先运行测试，并确认路线图和 README 中的能力描述与当前代码一致。
+该命令调用 `scripts/package-cocos-plugin.ps1`。脚本会读取 `scripts/package-cocos-plugin.config.json`；当 `targetExtensionsDirectory` 填写为 Cocos 项目的 `extensions` 目录时，会把插件复制到该目录下的 `asset-steward` 文件夹，`overwriteTarget` 控制是否允许覆盖已有目标。打包前应先运行测试，并确认路线图和 README 中的能力描述与当前代码一致。
 
 ## 文档职责
 

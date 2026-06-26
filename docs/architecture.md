@@ -6,7 +6,7 @@
 
 - `package.json` 注册菜单、快捷键、消息和 dockable 面板。
 - `main.js` 承载主进程消息方法和胶水逻辑。
-- `panel/main.js` 承载面板模板、样式、共享状态、事件绑定和跨模块流程；原健康检查中的 7 项能力以独立 Tab 呈现，部分状态/报告快照拼装已下沉到纯 helper。
+- `panel/main.js` 承载面板模板、样式、原始运行状态、事件绑定和跨模块流程；原健康检查中的 7 项能力以独立 Tab 呈现，状态/报告快照、项目维护文案和各模块渲染已下沉到 helper。
 
 ## 兼容协议
 
@@ -52,6 +52,7 @@
 - `panel/layout.js`：布局预设、Resizable 状态读写和尺寸边界。
 - `panel/overview.js`：总览风险、推荐下一步、危险操作和快照模型。
 - `panel/tool-panel.js`：独立功能页定义和可见性模型；功能开关同时控制对应 Tab 与页面。
+- `panel/project-maintenance.js`：项目缓存清理确认文案、请求 payload、结果摘要和日志详情。
 - `panel/health.js`、`panel/history.js`、`panel/unused.js`、`panel/scan.js`、`panel/node-reference.js`、`panel/classify.js`：各功能区摘要和行模型；`panel/classify.js` 也承接自动分类扫描后选中项过滤、全选当前结果、清空选择和单项勾选 helper。
 - `panel/render/*`：对应功能区 DOM 渲染、empty 状态和局部按钮回调。
 
