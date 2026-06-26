@@ -39,9 +39,9 @@ const TOOLBOX_MODULES = [
     tab: "scan",
     title: "资源扫描",
     status: "ready",
-    summary: "已接入缺失 meta、孤立 meta、空目录、类型统计和资源列表。",
+    summary: "已接入缺失 meta、孤立 meta、空目录和资源列表。",
     input: "搜索路径、扩展名、扫描目录",
-    output: "扫描摘要、异常列表、类型统计、资源列表",
+    output: "扫描摘要、资源列表",
     safety: "只读扫描，不删除、不修复、不创建目录。",
     nextAction: "作为后续报告导出、包体统计和目录规范检查的数据入口。"
   },

@@ -216,7 +216,7 @@ function buildOverviewNextSteps(risks, state) {
       severity: "warning",
       score: 60,
       title: "先跑资源扫描",
-      detail: "总览会先依赖资源扫描来识别缺失 meta、孤立 meta、空目录和类型统计。",
+      detail: "总览会先依赖资源扫描来识别缺失 meta、孤立 meta、空目录和资源状态。",
       actionLabel: "扫描资源",
       tab: "scan",
       run: "asset-scan"

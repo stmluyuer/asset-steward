@@ -12,10 +12,10 @@ const {
 
 function formatAssetScanSummary(summary) {
   if (!summary) {
-    return "尚未扫描。第一版只预览异常和统计，不删除、不修复、不创建目录。";
+    return "尚未扫描。只预览资源状态，不删除、不修复、不创建目录。";
   }
   const ignoredText = summary.ignoredIssueCount ? `，已忽略异常 ${safeNumber(summary.ignoredIssueCount)} 项` : "";
-  return `扫描 ${summary.scanDirectory || "assets"}：文件 ${safeNumber(summary.fileCount)} 项，目录 ${safeNumber(summary.directoryCount)} 项，总大小 ${formatSize(summary.totalSize || 0)}；缺失 meta ${safeNumber(summary.missingMetaCount)} 项，孤立 meta ${safeNumber(summary.orphanMetaCount)} 项，空目录 ${safeNumber(summary.emptyDirectoryCount)} 项${ignoredText}；当前筛选显示异常 ${safeNumber(summary.visibleIssueCount)} 项，类型 ${safeNumber(summary.typeCount)} 类。`;
+  return `扫描 ${summary.scanDirectory || "assets"}：文件 ${safeNumber(summary.fileCount)} 项，目录 ${safeNumber(summary.directoryCount)} 项，总大小 ${formatSize(summary.totalSize || 0)}；缺失 meta ${safeNumber(summary.missingMetaCount)} 项，孤立 meta ${safeNumber(summary.orphanMetaCount)} 项，空目录 ${safeNumber(summary.emptyDirectoryCount)} 项${ignoredText}。`;
 }
 
 function buildAssetScanResourceRows(entries) {

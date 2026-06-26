@@ -1,9 +1,7 @@
 "use strict";
 
 const {
-  buildAssetScanIssueRows,
   buildAssetScanResourceRows,
-  buildAssetScanTypeRows,
   buildReferenceRows,
   buildReferenceTargetRows,
   formatAssetScanSummary,
@@ -32,8 +30,6 @@ function renderAssetScanReport(panel, state, deps = {}) {
   const checkReferenceForPath = deps.checkReferenceForPath || (() => {});
   panel.$.assetScanSummary.textContent = formatAssetScanSummary(state.scanReportSummary);
   renderAssetScanResources(panel, state.scanResourceEntries, documentRef, locate, checkReferenceForPath);
-  renderAssetScanIssues(panel, state.scanIssues, documentRef, locate);
-  renderAssetScanTypes(panel, state.scanTypeStats, documentRef);
 }
 
 function renderAssetScanResources(panel, entries, documentRef, locate, checkReferenceForPath) {
@@ -52,38 +48,6 @@ function renderAssetScanResources(panel, entries, documentRef, locate, checkRefe
     if (entry.canCheckReference) {
       row.querySelector(".check-reference").addEventListener("click", () => checkReferenceForPath(entry.referencePath));
     }
-  }
-}
-
-function renderAssetScanIssues(panel, issues, documentRef, locate) {
-  const rows = buildAssetScanIssueRows(issues);
-  panel.$.assetScanIssueRows.innerHTML = "";
-  setEmptyState(panel.$.assetScanIssueEmpty, rows.length > 0);
-  for (const issue of rows) {
-    const row = appendRow(panel.$.assetScanIssueRows, `
-      <td class="${escapeHtml(issue.severityClass)}">${escapeHtml(issue.severityText)}</td>
-      <td>${escapeHtml(issue.kindText)}</td>
-      <td class="path" title="${escapeHtml(issue.path)}">${escapeHtml(issue.path)}</td>
-      <td>${escapeHtml(issue.extension || "-")}</td>
-      <td>${escapeHtml(issue.sizeText)}</td>
-      <td><button class="locate" ${issue.locatable ? "" : "disabled"}>${escapeHtml(issue.locateLabel)}</button></td>
-    `, documentRef);
-    if (issue.locatable) {
-      row.querySelector(".locate").addEventListener("click", () => locate(issue.locatePath));
-    }
-  }
-}
-
-function renderAssetScanTypes(panel, typeStats, documentRef) {
-  const rows = buildAssetScanTypeRows(typeStats);
-  panel.$.assetScanTypeRows.innerHTML = "";
-  setEmptyState(panel.$.assetScanTypeEmpty, rows.length > 0);
-  for (const stat of rows) {
-    appendRow(panel.$.assetScanTypeRows, `
-      <td>${escapeHtml(stat.extension)}</td>
-      <td>${safeNumber(stat.count)}</td>
-      <td>${escapeHtml(stat.totalSizeText)}</td>
-    `, documentRef);
   }
 }
 

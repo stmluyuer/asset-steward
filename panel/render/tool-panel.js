@@ -9,6 +9,10 @@ function getDocument(deps) {
   return deps?.document || globalThis.document;
 }
 
+function getQueryRoot(deps) {
+  return deps?.root || deps?.document || globalThis.document;
+}
+
 function renderToolPanel(panel, modules, visibility, deps = {}) {
   const documentRef = getDocument(deps);
   const onVisibilityChange = deps.onVisibilityChange || (() => {});
@@ -29,9 +33,9 @@ function renderToolPanel(panel, modules, visibility, deps = {}) {
 }
 
 function applyToolVisibility(modules, visibility, deps = {}) {
-  const documentRef = getDocument(deps);
+  const root = getQueryRoot(deps);
   for (const item of buildToolPanelRows(modules, visibility)) {
-    documentRef.querySelectorAll(item.selector).forEach((element) => {
+    root.querySelectorAll(item.selector).forEach((element) => {
       element.classList.toggle("hidden", !item.enabled);
     });
   }

@@ -15,6 +15,7 @@ const nodeReference = require("../panel/node-reference");
 const nodeReferenceRender = require("../panel/render/node-reference");
 const overview = require("../panel/overview");
 const overviewRender = require("../panel/render/overview");
+const projectMaintenance = require("../panel/project-maintenance");
 const scan = require("../panel/scan");
 const scanRender = require("../panel/render/scan");
 const state = require("../panel/state");
@@ -265,6 +266,42 @@ test("panel state helpers normalize asset scan result state", () => {
     scanIssues: [],
     scanTypeStats: [],
     scanReportSummary: null
+  });
+});
+
+test("panel project maintenance helpers keep cache cleanup messages stable", () => {
+  assert.equal(projectMaintenance.formatProjectCacheReloadStrategyText("assetdb-refresh"), "刷新 AssetDB，并在必要时手动重新打开项目");
+  assert.equal(projectMaintenance.formatProjectCacheReloadStrategyText("editor-reload"), "执行编辑器级项目重载/重启；如果当前 Creator API 不支持，将返回错误");
+  assert.equal(projectMaintenance.formatProjectCacheCleanConfirmMessage("assetdb-refresh").includes("library 和 temp"), true);
+  assert.deepEqual(projectMaintenance.buildProjectCacheCleanRequest("editor-reload"), {
+    directories: ["library", "temp"],
+    confirmed: true,
+    reloadStrategy: "editor-reload"
+  });
+  assert.equal(projectMaintenance.formatProjectCacheCleanSummary({
+    summary: {
+      deleted: 2,
+      skipped: 1,
+      failed: 0,
+      deletedSize: 1536
+    },
+    refresh: {
+      manualHint: "请重新打开项目。"
+    }
+  }, {
+    safeNumber: format.safeNumber,
+    formatSize: format.formatSize
+  }), "缓存清理完成：删除 2 个目录，跳过 1 个，失败 0 个；释放约 1.5 KB。请重新打开项目。");
+  assert.deepEqual(JSON.parse(projectMaintenance.buildProjectCacheCleanLogDetail({
+    deleted: ["library"],
+    skipped: ["temp"],
+    failed: [],
+    refresh: { strategy: "assetdb-refresh" }
+  })), {
+    deleted: ["library"],
+    skipped: ["temp"],
+    failed: [],
+    refresh: { strategy: "assetdb-refresh" }
   });
 });
 
@@ -1293,11 +1330,17 @@ test("panel tool panel renderer fills rows and applies hidden classes", () => {
       healthNode.classList.hidden = enabled;
     }
   };
-  const visibilityDocument = {
+  const unusedDocument = {
+    querySelectorAll: () => {
+      throw new Error("applyToolVisibility should use the provided panel root");
+    }
+  };
+  const panelRoot = {
     querySelectorAll: (selector) => selector.includes("scan") ? [scanNode] : [healthNode]
   };
   toolPanelRender.applyToolVisibility(modules, { scan: false, health: true }, {
-    document: visibilityDocument
+    document: unusedDocument,
+    root: panelRoot
   });
   assert.equal(scanNode.classList.hidden, true);
   assert.equal(healthNode.classList.hidden, false);
@@ -1830,7 +1873,7 @@ test("panel scan helpers build asset scan and reference row models", () => {
     ignoredIssueCount: 1,
     visibleIssueCount: 2,
     typeCount: 3
-  }), "扫描 assets/res：文件 3 项，目录 2 项，总大小 2.0 KB；缺失 meta 1 项，孤立 meta 2 项，空目录 1 项，已忽略异常 1 项；当前筛选显示异常 2 项，类型 3 类。");
+  }), "扫描 assets/res：文件 3 项，目录 2 项，总大小 2.0 KB；缺失 meta 1 项，孤立 meta 2 项，空目录 1 项，已忽略异常 1 项。");
 
   assert.deepEqual(scan.buildAssetScanResourceRows([{
     path: "assets/res/fish.png",
@@ -1924,10 +1967,6 @@ test("panel scan renderers fill scan and reference tables", () => {
       assetScanSummary: createFakeNode(),
       assetScanResourceRows: createFakeNode(),
       assetScanResourceEmpty: createFakeNode(),
-      assetScanIssueRows: createFakeNode(),
-      assetScanIssueEmpty: createFakeNode(),
-      assetScanTypeRows: createFakeNode(),
-      assetScanTypeEmpty: createFakeNode(),
       referenceSummary: createFakeNode(),
       referenceTargetRows: createFakeNode(),
       referenceTargetEmpty: createFakeNode(),
@@ -1966,7 +2005,6 @@ test("panel scan renderers fill scan and reference tables", () => {
   });
 
   assert.equal(panel.$.assetScanResourceRows.children.length, 1);
-  assert.equal(panel.$.assetScanIssueRows.children[0].innerHTML.includes("空目录"), true);
   panel.$.assetScanResourceRows.children[0].handlers[0].handler();
   panel.$.assetScanResourceRows.children[0].handlers[1].handler();
   assert.deepEqual(located, ["assets/res/fish.png"]);

@@ -94,6 +94,12 @@ const {
   renderReferences: renderReferencesView,
 } = require("./render/scan");
 const {
+  buildProjectCacheCleanLogDetail,
+  buildProjectCacheCleanRequest,
+  formatProjectCacheCleanConfirmMessage,
+  formatProjectCacheCleanSummary,
+} = require("./project-maintenance");
+const {
   renderNodeReferences: renderNodeReferencesView,
 } = require("./render/node-reference");
 const {
@@ -254,7 +260,7 @@ exports.template = `
       <button id="assetScanButton">扫描资源</button>
     </header>
 
-    <div class="summary" id="assetScanSummary">尚未扫描。第一版只预览异常和统计，不删除、不修复、不创建目录。</div>
+    <div class="summary" id="assetScanSummary">尚未扫描。只预览资源状态，不删除、不修复、不创建目录。</div>
 
     <section class="asset-section scan-resource-section">
       <h3>资源列表</h3>
@@ -266,31 +272,6 @@ exports.template = `
         <div id="assetScanResourceEmpty" class="empty">点击“扫描资源”后，可在这里直接对资源执行“查引用”。</div>
       </div>
     </section>
-
-    <div class="scan-workspace resizable-split" data-resize-id="scan-issues">
-      <section class="asset-section">
-        <h3>异常列表</h3>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>风险</th><th>异常</th><th>路径</th><th>类型</th><th>大小</th><th>操作</th></tr></thead>
-            <tbody id="assetScanIssueRows"></tbody>
-          </table>
-          <div id="assetScanIssueEmpty" class="empty">点击“扫描资源”读取缺失 meta、孤立 meta 和空目录。</div>
-        </div>
-      </section>
-      <div class="resize-handle" data-resize-handle title="拖拽调整宽度"></div>
-
-      <section class="asset-section">
-        <h3>类型统计</h3>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>类型</th><th>数量</th><th>总大小</th></tr></thead>
-            <tbody id="assetScanTypeRows"></tbody>
-          </table>
-          <div id="assetScanTypeEmpty" class="empty">扫描后显示按扩展名统计的文件数量和体积。</div>
-        </div>
-      </section>
-    </div>
 
     <section class="reference-section">
       <h3>资源引用检查</h3>
@@ -808,7 +789,6 @@ button:disabled { cursor: default; opacity: .45; }
 .overview-row.blocked { border-color: #9b4c4c; color: inherit; }
 .overview-row.ready { border-color: #4f7d54; color: inherit; }
 .workspace { display: grid; flex: 1; gap: 10px; grid-template-columns: var(--split-left, minmax(560px, 1fr)) 8px minmax(280px, 360px); min-height: 260px; }
-.scan-workspace { display: grid; flex: 1; gap: 10px; grid-template-columns: var(--split-left, minmax(560px, 1fr)) 8px minmax(280px, 360px); min-height: 0; }
 .scan-resource-section { flex: 0 0 180px; margin-bottom: 10px; }
 .reference-section { border: 1px solid #444; box-sizing: border-box; flex: 0 0 255px; margin-top: 10px; min-height: 0; padding: 8px; }
 .reference-section > h3 { color: #eee; font-size: 13px; margin: 0 0 8px; }
@@ -939,10 +919,6 @@ exports.$ = {
   assetScanSummary: "#assetScanSummary",
   assetScanResourceRows: "#assetScanResourceRows",
   assetScanResourceEmpty: "#assetScanResourceEmpty",
-  assetScanIssueRows: "#assetScanIssueRows",
-  assetScanIssueEmpty: "#assetScanIssueEmpty",
-  assetScanTypeRows: "#assetScanTypeRows",
-  assetScanTypeEmpty: "#assetScanTypeEmpty",
   referenceTargetInput: "#referenceTargetInput",
   referenceDirectoryInput: "#referenceDirectoryInput",
   referenceExtensionInput: "#referenceExtensionInput",
@@ -1282,7 +1258,9 @@ function renderToolPanel(panel) {
 }
 
 function applyToolVisibility(panel) {
-  applyToolVisibilityView(TOOL_PANEL_MODULES, toolVisibility);
+  applyToolVisibilityView(TOOL_PANEL_MODULES, toolVisibility, {
+    root: panel.$.tabBar.getRootNode?.() || document,
+  });
   const activeButton = panel.$.tabBar.querySelector(".tab-button.active");
   if (activeButton?.classList.contains("hidden")) {
     activateTab(panel, "overview");
@@ -1654,31 +1632,18 @@ async function clearLogs(panel) {
 
 async function cleanProjectCache(panel) {
   const reloadStrategy = panel.$.projectCacheReloadStrategySelect.value;
-  const reloadText = reloadStrategy === "editor-reload"
-    ? "执行编辑器级项目重载/重启；如果当前 Creator API 不支持，将返回错误"
-    : "刷新 AssetDB，并在必要时手动重新打开项目";
-  if (!window.confirm(`即将删除项目根目录下的 library 和 temp 缓存目录，并${reloadText}。\n\n该操作不可撤销，建议先关闭预览、构建和正在运行的任务。\n\n继续执行？`)) {
+  if (!window.confirm(formatProjectCacheCleanConfirmMessage(reloadStrategy))) {
     return;
   }
 
   setBusy(panel, true);
   setStatus(panel, "正在清理 library/temp...");
   try {
-    const result = await requestMain("clean-project-cache", {
-      directories: ["library", "temp"],
-      confirmed: true,
-      reloadStrategy
-    });
+    const result = await requestMain("clean-project-cache", buildProjectCacheCleanRequest(reloadStrategy));
     const summary = result.summary || {};
-    const refreshHint = result.refresh?.manualHint || "请根据 Creator 状态手动重新打开项目。";
-    const message = `缓存清理完成：删除 ${safeNumber(summary.deleted)} 个目录，跳过 ${safeNumber(summary.skipped)} 个，失败 ${safeNumber(summary.failed)} 个；释放约 ${formatSize(summary.deletedSize || 0)}。${refreshHint}`;
+    const message = formatProjectCacheCleanSummary(result, { safeNumber, formatSize });
     panel.$.projectCacheCleanSummary.textContent = message;
-    await addLog(panel, summary.failed ? "warning" : "info", message, JSON.stringify({
-      deleted: result.deleted,
-      skipped: result.skipped,
-      failed: result.failed,
-      refresh: result.refresh
-    }, null, 2));
+    await addLog(panel, summary.failed ? "warning" : "info", message, buildProjectCacheCleanLogDetail(result));
     setStatus(panel, message);
   } catch (error) {
     const message = `缓存清理失败：${error.message}`;
@@ -1697,7 +1662,7 @@ function renderLogs(panel) {
 
 async function scanAssetReport(panel) {
   setBusy(panel, true);
-  setStatus(panel, "正在扫描资源异常和类型统计...");
+  setStatus(panel, "正在扫描资源状态...");
   try {
     const result = await requestMain("scan-assets", {
       search: panel.$.assetScanSearchInput.value,
